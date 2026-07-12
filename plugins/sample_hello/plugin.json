@@ -1,0 +1,9 @@
+{
+  "id": "sample_hello",
+  "name": "Hello Sample",
+  "version": "1.0.0",
+  "description": "A minimal example plugin that adds a page to the sidebar. Use it as a starting point for your own plugins.",
+  "author": "Wizz",
+  "icon": "resources/icon.png",
+  "min_app_version": "0.1.0"
+}
