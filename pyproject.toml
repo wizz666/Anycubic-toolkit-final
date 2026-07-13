@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "anycubic-toolkit"
+version = "0.1.0"
+description = "Open-source desktop companion for Anycubic 3D printer owners."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [{ name = "Wizz" }]
+keywords = ["anycubic", "3d-printing", "log-analysis", "firmware", "qt", "pyside6"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: X11 Applications :: Qt",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Printing",
+    "Topic :: Utilities",
+]
+dependencies = ["PySide6>=6.6,<7", "paho-mqtt>=2.1,<3"]
+
+[project.urls]
+Homepage = "https://github.com/wizz666/Anycubic-toolkit-final"
+Repository = "https://github.com/wizz666/Anycubic-toolkit-final"
+Sponsors = "https://github.com/sponsors/wizz666"
+
+[project.gui-scripts]
+anycubic-toolkit = "anycubic_toolkit.app:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+anycubic_toolkit = [
+    "resources/i18n/*.json",
+    "resources/themes/*.qss",
+    "resources/icons/*",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "D", "UP", "B", "ANN"]
+ignore = ["D203", "D213", "ANN401"]
+
+[tool.ruff.lint.per-file-ignores]
+"plugins/*" = ["D", "ANN"]

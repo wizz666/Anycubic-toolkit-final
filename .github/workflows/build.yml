@@ -1,0 +1,90 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  # ------------------------------------------------------------------ checks
+  lint:
+    name: Lint & compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install tooling
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff
+
+      - name: Compile all sources
+        run: python -m compileall src plugins
+
+      - name: Ruff (non-blocking)
+        run: ruff check src || true
+
+  # ------------------------------------------------------- Windows executable
+  build-windows:
+    name: Build Windows EXE
+    runs-on: windows-latest
+    needs: lint
+    # Build the Windows EXE on every push to main, on tags, and on manual runs
+    # — but skip pull requests (they'd double-build and waste Windows minutes,
+    # which cost 2x on private repos). To build without pushing, use the
+    # "Run workflow" button on the Actions tab (workflow_dispatch).
+    if: github.event_name != 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Build with PyInstaller
+        run: pyinstaller --noconfirm anycubic_toolkit.spec
+
+      - name: Package ZIP and checksum
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}"
+          $zip = "AnycubicToolkit-$version-windows-x64.zip"
+          Compress-Archive -Path dist/AnycubicToolkit.exe -DestinationPath $zip -Force
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+          "$hash  $zip" | Out-File -Encoding ascii "$zip.sha256"
+          echo "ASSET_ZIP=$zip" >> $env:GITHUB_ENV
+          echo "ASSET_SHA=$zip.sha256" >> $env:GITHUB_ENV
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: anycubic-toolkit-windows
+          path: |
+            ${{ env.ASSET_ZIP }}
+            ${{ env.ASSET_SHA }}
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ env.ASSET_ZIP }}
+            ${{ env.ASSET_SHA }}
+          generate_release_notes: true
