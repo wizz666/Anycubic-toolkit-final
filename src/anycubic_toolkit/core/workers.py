@@ -13,6 +13,7 @@ Usage::
 
 from __future__ import annotations
 
+import threading
 import traceback
 from typing import Any, Callable
 
@@ -65,6 +66,29 @@ def _accepts_progress(fn: Callable[..., Any]) -> bool:
         return False
 
 
+_active_workers: set[FunctionWorker] = set()
+_active_lock = threading.Lock()
+
+
 def run_in_background(worker: FunctionWorker) -> None:
-    """Submit a worker to the global thread pool."""
+    """Submit a worker to the global thread pool.
+
+    A ``QRunnable`` has no owner on the Python side once the caller's local
+    variable goes out of scope, so nothing keeps it (or its ``signals``
+    QObject) alive while it runs on the pool thread — Python can garbage
+    collect it mid-run, and the eventual ``signals.finished.emit(...)`` then
+    raises "Signal source has been deleted". This is rare with a single
+    in-flight worker but reliably reproducible with several concurrent ones
+    (e.g. polling multiple printers at once), so a strong reference is held
+    here until the worker reports its result.
+    """
+    with _active_lock:
+        _active_workers.add(worker)
+    worker.signals.finished.connect(lambda _result: _release(worker))
+    worker.signals.error.connect(lambda _message: _release(worker))
     QThreadPool.globalInstance().start(worker)
+
+
+def _release(worker: FunctionWorker) -> None:
+    with _active_lock:
+        _active_workers.discard(worker)
