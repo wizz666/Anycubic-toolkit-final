@@ -1,11 +1,33 @@
 # Anycubic Toolkit
 
+<p align="center">
+  <img src="src/anycubic_toolkit/resources/icons/app.png" alt="Anycubic Toolkit icon" width="96">
+</p>
+
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-informational)](https://wizz.se/anycubic-toolkit/)
+[![Python](https://img.shields.io/badge/python-3.12%2B-blue)](https://www.python.org/)
+[![Download](https://img.shields.io/badge/download-wizz.se-f5b042)](https://wizz.se/anycubic-toolkit/)
+
 A free, open-source desktop companion for owners of Anycubic 3D printers.
 Analyze printer logs, look up error codes, track firmware, monitor printer
-health and extend everything with plugins — all in a modern, cross-platform
-Qt interface.
+health, connect to and monitor multiple printers at once, and extend
+everything with plugins — all in a modern, cross-platform Qt interface.
 
 > Not affiliated with Anycubic. Built by the community, for the community.
+
+**⬇ [Download the latest Windows build from wizz.se](https://wizz.se/anycubic-toolkit/)**
+— no installation required, just unzip and run.
+
+## Disclaimer
+
+⚠️ Anycubic Toolkit is free, open-source software (MIT license), provided
+as-is with no warranties of any kind. All use — including connecting to
+printers, analyzing logs and updating firmware — is entirely at your own
+risk. Neither the developer nor wizz.se is responsible for damage to your
+printer, data loss, or any other issues arising from using the app. Always
+read the manufacturer's own instructions before updating firmware, and never
+interrupt power during an update.
 
 ## Features
 
@@ -39,21 +61,17 @@ as simple as dropping a JSON file into `resources/i18n/` (see below).
 
 ## Screenshots
 
-_Screenshots go here once the first release is tagged._
-
-<!--
 ![Dashboard](docs/screenshots/dashboard.png)
-![Log Analyzer](docs/screenshots/log-analyzer.png)
--->
 
 ## Install
 
 ### Windows
 
-Download the latest `AnycubicToolkit-*-windows-x64.zip` from the
-[Releases](https://github.com/wizz666/Anycubic-toolkit-final/releases) page, verify
-the `.sha256` checksum, unzip and run `AnycubicToolkit.exe`. No installation
-required.
+Download the latest `AnycubicToolkit-windows-x64.zip` from
+**[wizz.se/anycubic-toolkit](https://wizz.se/anycubic-toolkit/)** (or the
+[Releases](https://github.com/wizz666/Anycubic-toolkit-final/releases) page
+once a release is tagged there), verify the `.sha256` checksum, unzip and run
+`AnycubicToolkit.exe`. No installation required.
 
 ### From source (any platform)
 
