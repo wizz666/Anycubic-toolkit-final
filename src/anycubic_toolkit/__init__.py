@@ -21,3 +21,10 @@ __anycubic_wiki__: str = "https://wiki.anycubic.com"
 __anycubic_error_codes__: str = "https://wiki.anycubic.com/en/error-codes"
 __anycubic_firmware__: str = "https://eu.anycubic.com/pages/firmware-software"
 __makeronline__: str = "https://www.makeronline.com/en/"
+# Rinkhals doesn't support the Kobra X yet (RSA-signed firmware, not cracked),
+# so there is no official structured catalog for it. This community-shared
+# folder is the only alternative to Anycubic's own site; the app never
+# downloads from it automatically and never verifies its contents.
+__kobra_x_community_firmware__: str = (
+    "https://drive.google.com/drive/folders/1RhOhEmEnSxnshcnQUwMOMGBashxQByF9"
+)

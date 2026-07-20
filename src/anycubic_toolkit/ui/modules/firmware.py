@@ -19,7 +19,9 @@ from PySide6.QtWidgets import (
 
 from anycubic_toolkit.core.models import KNOWN_MODELS
 from anycubic_toolkit.core.rinkhals import RINKHALS_HOME, RinkhalsClient
-from anycubic_toolkit.core.websources import firmware_url
+from anycubic_toolkit.core.websources import firmware_url, kobra_x_community_firmware_url
+
+_KOBRA_X_CODE = "K4P"
 from anycubic_toolkit.core.workers import FunctionWorker, run_in_background
 from anycubic_toolkit.ui.modules.base import ModulePage
 from anycubic_toolkit.ui.widgets import Card
@@ -96,6 +98,14 @@ class FirmwareCenterPage(ModulePage):
         )
         body.addWidget(self.official_btn, alignment=Qt.AlignmentFlag.AlignLeft)
 
+        self.community_btn = QPushButton()
+        self.community_btn.setObjectName("Link")
+        self.community_btn.clicked.connect(
+            lambda: QDesktopServices.openUrl(QUrl(kobra_x_community_firmware_url()))
+        )
+        self.community_btn.setVisible(False)
+        body.addWidget(self.community_btn, alignment=Qt.AlignmentFlag.AlignLeft)
+
         self.content_layout.addWidget(self.available_card)
         self.content_layout.addStretch(1)
 
@@ -115,6 +125,9 @@ class FirmwareCenterPage(ModulePage):
         self.download_btn.setText("\N{DOWNWARDS BLACK ARROW} " + self.tr_("firmware.download"))
         self.official_btn.setText(
             "\N{GLOBE WITH MERIDIANS} " + self.tr_("firmware.official")
+        )
+        self.community_btn.setText(
+            "\N{GLOBE WITH MERIDIANS} " + self.tr_("firmware.community_archive")
         )
         self._refresh_installed()
 
@@ -187,8 +200,11 @@ class FirmwareCenterPage(ModulePage):
         self._loaded = True
         self._catalog = catalog
         self.fw_list.clear()
+        is_kobra_x = self._effective_code() == _KOBRA_X_CODE
+        self.community_btn.setVisible(is_kobra_x and not catalog)
         if not catalog:
-            self.status_label.setText(self.tr_("firmware.not_in_catalog"))
+            key = "firmware.kobra_x_notice" if is_kobra_x else "firmware.not_in_catalog"
+            self.status_label.setText(self.tr_(key))
             return
         self.status_label.setText(self.tr_("firmware.catalog_source"))
         for index, entry in enumerate(catalog):

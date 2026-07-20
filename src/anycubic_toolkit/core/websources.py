@@ -10,7 +10,12 @@ data in this module comes from:
   app and is used only as a "browse all" deep link.
 * Firmware — the official Anycubic "Firmware & Software" page. It is fetched
   directly and download links are extracted best-effort; the page is always
-  offered as an authoritative deep link.
+  offered as an authoritative deep link. For the Kobra X specifically, the
+  page's real download links only appear after client-side JavaScript runs
+  (no browser engine here), and Rinkhals has no catalog for it either (its
+  firmware isn't cracked yet), so the app also deep-links a community-shared
+  folder as a clearly-labeled, unverified fallback — never downloaded or
+  re-hosted by the app itself.
 * Makeronline — Anycubic's model platform, opened in the browser.
 
 Only canonical, tracking-free URLs are requested. No personal data or tracking
@@ -32,6 +37,7 @@ from anycubic_toolkit import (
     __anycubic_firmware__,
     __anycubic_wiki__,
     __app_name__,
+    __kobra_x_community_firmware__,
     __makeronline__,
     __version__,
 )
@@ -62,6 +68,11 @@ def error_code_page_url(code: str) -> str:
 def firmware_url() -> str:
     """Official Anycubic firmware & software page."""
     return __anycubic_firmware__
+
+
+def kobra_x_community_firmware_url() -> str:
+    """Community-shared Kobra X firmware folder (unverified — see docstring above)."""
+    return __kobra_x_community_firmware__
 
 
 def makeronline_url(path: str = "") -> str:

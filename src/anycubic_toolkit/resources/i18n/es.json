@@ -120,9 +120,11 @@
     "from_official": "Aparece en la página oficial de firmware y software de Anycubic.",
     "installed_tag": "instalado",
     "not_in_catalog": "Aún no hay catálogo de firmware de Rinkhals para este modelo: usa la página oficial de Anycubic abajo.",
+    "kobra_x_notice": "Rinkhals aún no es compatible con la Kobra X — su firmware usa un formato más nuevo, firmado con RSA, que todavía no se ha descifrado, así que no existe un catálogo verificado y con checksums para ella. Obtén el firmware desde la página oficial de Anycubic abajo. También existe un archivo compartido por la comunidad, pero sus archivos no están verificados por esta app — úsalo bajo tu propio riesgo.",
     "catalog_source": "Lista de firmware del catálogo comunitario de Rinkhals.",
     "model_select": "Modelo de impresora:",
-    "help": "El firmware es el software que se ejecuta en tu impresora. Elige tu modelo (o analiza un registro) y la app lista las versiones disponibles con sus notas de cambios. Tu versión instalada se marca. Actualiza solo si tienes motivo, y lee las notas antes."
+    "help": "El firmware es el software que se ejecuta en tu impresora. Elige tu modelo (o analiza un registro) y la app lista las versiones disponibles con sus notas de cambios. Tu versión instalada se marca. Actualiza solo si tienes motivo, y lee las notas antes.",
+    "community_archive": "Archivo de firmware de la comunidad (sin verificar)"
   },
   "rinkhals": {
     "title": "Rinkhals",

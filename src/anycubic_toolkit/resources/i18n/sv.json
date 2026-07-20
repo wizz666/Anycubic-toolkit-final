@@ -120,9 +120,11 @@
     "from_official": "Listad på Anycubics officiella sida för firmware och mjukvara.",
     "installed_tag": "installerad",
     "not_in_catalog": "Ingen Rinkhals-firmwarekatalog för den här modellen ännu — använd Anycubics officiella sida nedan.",
+    "kobra_x_notice": "Rinkhals stöder inte Kobra X än — dess firmware använder ett nyare, RSA-signerat format som ännu inte knäckts, så det finns ingen verifierad, checksummad katalog för den. Hämta firmware från Anycubics officiella sida nedan. Det finns även ett community-delat arkiv, men filerna där är inte checksumverifierade av appen — använd på egen risk.",
     "catalog_source": "Firmware-lista från Rinkhals community-katalog.",
     "model_select": "Skrivarmodell:",
-    "help": "Firmware är mjukvaran som kör i din skrivare. Välj din modell (eller analysera en logg först) så listar appen tillgängliga firmware-versioner med ändringsnoteringar. Din installerade version markeras. Uppdatera bara om du har anledning, och läs noteringarna först."
+    "help": "Firmware är mjukvaran som kör i din skrivare. Välj din modell (eller analysera en logg först) så listar appen tillgängliga firmware-versioner med ändringsnoteringar. Din installerade version markeras. Uppdatera bara om du har anledning, och läs noteringarna först.",
+    "community_archive": "Community-firmwarearkiv (overifierat)"
   },
   "rinkhals": {
     "title": "Rinkhals",
