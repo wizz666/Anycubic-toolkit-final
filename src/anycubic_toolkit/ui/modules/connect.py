@@ -66,6 +66,8 @@ class _PrinterCard(Card):
 
     removed = Signal(str)
     refresh_requested = Signal(str)
+    light_toggle_requested = Signal(str)
+    camera_requested = Signal(str)
 
     def __init__(self, entry: dict[str, Any], parent=None) -> None:
         super().__init__("", parent)
@@ -73,6 +75,7 @@ class _PrinterCard(Card):
         self.host = str(entry.get("host", ""))
         self.name = str(entry.get("name", "")).strip()
         self._tr: Callable[..., str] | None = None
+        self._light_on: bool | None = None
 
         body = self.body_layout()
 
@@ -109,11 +112,16 @@ class _PrinterCard(Card):
         self.temps_label.setWordWrap(True)
         self.print_label = QLabel()
         self.print_label.setWordWrap(True)
+        self.ace_label = QLabel()
+        self.ace_label.setObjectName("Muted")
+        self.ace_label.setWordWrap(True)
+        self.ace_label.setVisible(False)
         body.addWidget(self.state_label)
         body.addWidget(self.mode_label)
         body.addWidget(self.versions_label)
         body.addWidget(self.temps_label)
         body.addWidget(self.print_label)
+        body.addWidget(self.ace_label)
 
         links = QHBoxLayout()
         self.moonraker_btn = QPushButton()
@@ -124,8 +132,18 @@ class _PrinterCard(Card):
         self.web_btn.setObjectName("Link")
         self.web_btn.clicked.connect(self._open_web)
         self.web_btn.setVisible(False)
+        self.light_btn = QPushButton()
+        self.light_btn.setObjectName("Link")
+        self.light_btn.clicked.connect(lambda: self.light_toggle_requested.emit(self.entry_id))
+        self.light_btn.setVisible(False)
+        self.camera_btn = QPushButton()
+        self.camera_btn.setObjectName("Link")
+        self.camera_btn.clicked.connect(lambda: self.camera_requested.emit(self.entry_id))
+        self.camera_btn.setVisible(False)
         links.addWidget(self.moonraker_btn)
         links.addWidget(self.web_btn)
+        links.addWidget(self.light_btn)
+        links.addWidget(self.camera_btn)
         links.addStretch(1)
         body.addLayout(links)
 
@@ -137,6 +155,13 @@ class _PrinterCard(Card):
         self.remove_btn.setText("\N{CROSS MARK} " + tr("connect.remove"))
         self.moonraker_btn.setText("\N{GLOBE WITH MERIDIANS} " + tr("connect.open_moonraker"))
         self.web_btn.setText("\N{GLOBE WITH MERIDIANS} " + tr("connect.open_web"))
+        self.camera_btn.setText("\N{VIDEO CAMERA} " + tr("connect.open_camera"))
+        self._update_light_button()
+
+    def _update_light_button(self) -> None:
+        tr = self._tr or (lambda key, **_kw: key)
+        key = "connect.light_off" if self._light_on else "connect.light_on"
+        self.light_btn.setText("\N{ELECTRIC LIGHT BULB} " + tr(key))
 
     # --------------------------------------------------------------- display
 
@@ -152,8 +177,11 @@ class _PrinterCard(Card):
         self.versions_label.setText("")
         self.temps_label.setText("")
         self.print_label.setText("")
+        self.ace_label.setVisible(False)
         self.moonraker_btn.setVisible(False)
         self.web_btn.setVisible(False)
+        self.light_btn.setVisible(False)
+        self.camera_btn.setVisible(False)
 
     def show_moonraker(self, status: PrinterStatus) -> None:
         tr = self._tr or (lambda key, **_kw: key)
@@ -161,6 +189,9 @@ class _PrinterCard(Card):
         self.mode_label.setText(tr("connect.mode_moonraker"))
         self.moonraker_btn.setVisible(True)
         self.web_btn.setVisible(True)
+        self.ace_label.setVisible(False)
+        self.light_btn.setVisible(False)
+        self.camera_btn.setVisible(False)
         versions = []
         if status.moonraker_version:
             versions.append(f"Moonraker {status.moonraker_version}")
@@ -228,6 +259,32 @@ class _PrinterCard(Card):
             self.print_label.setText(
                 tr("connect.print_state", state=status.print_state or "idle")
             )
+
+        if status.ace_present and any(slot.material for slot in status.ace_slots):
+            parts = [tr("connect.ace_box", temp=status.ace_temp, humidity=status.ace_humidity)]
+            for index, slot in enumerate(status.ace_slots, start=1):
+                if not slot.material:
+                    continue
+                marker = "\N{BULLET} " if index == status.ace_loaded_slot else ""
+                parts.append(
+                    tr("connect.ace_slot", marker=marker, index=index, material=slot.material, percent=int(slot.percent))
+                )
+            self.ace_label.setText("  ".join(parts))
+            self.ace_label.setVisible(True)
+        else:
+            self.ace_label.setVisible(False)
+
+        if status.light_on is not None:
+            self._light_on = status.light_on
+            self._update_light_button()
+            self.light_btn.setVisible(True)
+        else:
+            self.light_btn.setVisible(False)
+        self.camera_btn.setVisible(bool(status.camera_available))
+
+    @property
+    def is_light_on(self) -> bool:
+        return bool(self._light_on)
 
     # ------------------------------------------------------------------ links
 
@@ -608,6 +665,8 @@ class ConnectPage(ModulePage):
         card = _PrinterCard(entry)
         card.removed.connect(self._remove_printer)
         card.refresh_requested.connect(lambda pid: self._refresh_printer(pid, manual=True))
+        card.light_toggle_requested.connect(self._toggle_light)
+        card.camera_requested.connect(self._open_camera)
         card.retranslate(self.tr_)
         self._cards[card.entry_id] = card
         self.printers_layout.addWidget(card)
@@ -833,6 +892,60 @@ class ConnectPage(ModulePage):
         if card is not None:
             card.show_offline(text)
         self._latest_display[printer_id] = {"state": text, "mode": "", "temps": "", "print": ""}
+
+    # ---------------------------------------------------------- light/camera
+
+    def _toggle_light(self, printer_id: str) -> None:
+        entry = self._entry_by_id(printer_id)
+        card = self._cards.get(printer_id)
+        if entry is None or card is None:
+            return
+        host = str(entry.get("host", ""))
+        turn_on = not card.is_light_on
+        worker = FunctionWorker(self._set_light, host, turn_on)
+        worker.signals.finished.connect(
+            lambda status, pid=printer_id: self._apply_lan_update(pid, status)
+        )
+        worker.signals.error.connect(
+            lambda msg: self.status_label.setText(self.tr_("connect.light_error", reason=msg))
+        )
+        run_in_background(worker)
+
+    def _set_light(self, host: str, turn_on: bool) -> LanPrinterStatus:
+        creds = self._lan_credentials(host)
+        return AnycubicLanClient(creds).fetch_status(collect_seconds=3.0, set_light=(turn_on, 100))
+
+    def _open_camera(self, printer_id: str) -> None:
+        entry = self._entry_by_id(printer_id)
+        if entry is None:
+            return
+        host = str(entry.get("host", ""))
+        self.status_label.setText(self.tr_("connect.camera_starting"))
+        worker = FunctionWorker(self._start_camera, host)
+        worker.signals.finished.connect(
+            lambda status, pid=printer_id: self._on_camera_started(pid, status)
+        )
+        worker.signals.error.connect(
+            lambda msg: self.status_label.setText(self.tr_("connect.camera_error", reason=msg))
+        )
+        run_in_background(worker)
+
+    def _start_camera(self, host: str) -> LanPrinterStatus:
+        creds = self._lan_credentials(host)
+        return AnycubicLanClient(creds).fetch_status(collect_seconds=4.0, start_camera=True)
+
+    def _on_camera_started(self, printer_id: str, status: LanPrinterStatus) -> None:
+        self._apply_lan_update(printer_id, status)
+        if status.camera_url:
+            self.status_label.setText("")
+            QDesktopServices.openUrl(QUrl(status.camera_url))
+        else:
+            self.status_label.setText(self.tr_("connect.camera_no_url"))
+
+    def _apply_lan_update(self, printer_id: str, status: LanPrinterStatus) -> None:
+        card = self._cards.get(printer_id)
+        if card is not None and status.online:
+            card.show_lan(status)
 
     # -------------------------------------------------------------- monitor
 

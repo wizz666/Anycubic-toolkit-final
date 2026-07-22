@@ -14,10 +14,18 @@ Home Assistant integration), has two stages:
 2. **Status** over MQTT/TLS on port 9883: the app connects with the bundle's
    credentials, subscribes to the printer's report topics and publishes small
    query commands; the printer answers with JSON reports (state, temperatures,
-   progress, layers, …).
+   progress, layers, ACE/multi-color-box, light and camera state, …). The same
+   session can optionally publish one-off commands (start/stop the camera,
+   set the chamber light) alongside the read-only queries.
 
 Everything stays on the local network. Credentials are cached in the app
 configuration so provisioning happens once per printer.
+
+The connection itself does not hardcode a model: the printer reports its own
+``modelId``/``modelName`` during provisioning, so any Anycubic printer using
+this same "avata" LAN protocol should work here even if it isn't in the
+toolkit's static model catalog yet (only the Kobra X and Kobra S1 have been
+tested against real hardware for this project so far).
 
 MQTT requires the ``paho-mqtt`` package; if it's missing the client reports a
 clear error instead of crashing (provisioning itself is pure stdlib).
@@ -29,6 +37,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 import secrets
 import ssl
 import string
@@ -47,12 +56,14 @@ from anycubic_toolkit.core.aes import aes128_cbc_decrypt, pkcs7_unpad
 
 CTRL_HTTP_PORT = 18910
 MQTT_PORT = 9883
+STREAM_HTTP_PORT = 18088
 TOPIC_BASE = "anycubic/anycubicCloud/v1"
 _HTTP_TIMEOUT = 10
 _MQTT_CONNECT_TIMEOUT = 10
 _REPORT_COLLECT_SECONDS = 6.0
 _USER_AGENT = f"{__app_name__}/{__version__}"
 _NONCE_CHARS = string.ascii_letters + string.digits
+_LIVE_URL_RE = re.compile(r"https?://[^\s\"']+/live/[^\s\"']+")
 
 # Queries published after connecting; the printer answers on its report topics.
 _QUERY_SPECS: tuple[tuple[str, str, str], ...] = (
@@ -199,6 +210,18 @@ def provision(host: str) -> LanCredentials:
 
 
 @dataclass
+class AceSlot:
+    """One filament slot in an ACE multi-color box (e.g. on a Kobra S1 Combo)."""
+
+    material: str = ""
+    status: str = ""
+    percent: float = 0.0
+    weight: float = 0.0
+    sku: str = ""
+    color_hex: str = ""
+
+
+@dataclass
 class LanPrinterStatus:
     """A snapshot of live printer state collected over local MQTT."""
 
@@ -218,6 +241,15 @@ class LanPrinterStatus:
     bed_temp: float = 0.0
     bed_target: float = 0.0
     fan_speed_pct: int = 0
+    light_on: bool | None = None  # None: printer hasn't reported it (yet)
+    light_brightness: int = 0  # 0-100
+    camera_available: bool | None = None
+    camera_url: str = ""  # only set once a stream has been (re)started
+    ace_present: bool = False
+    ace_temp: float = 0.0
+    ace_humidity: float = 0.0
+    ace_loaded_slot: int = -1  # -1: none loaded / unknown
+    ace_slots: list[AceSlot] = field(default_factory=list)
     raw_topics: list[str] = field(default_factory=list)
 
 
@@ -228,9 +260,21 @@ class AnycubicLanClient:
         self.credentials = credentials
 
     def fetch_status(
-        self, collect_seconds: float = _REPORT_COLLECT_SECONDS
+        self,
+        collect_seconds: float = _REPORT_COLLECT_SECONDS,
+        *,
+        start_camera: bool = False,
+        stop_camera: bool = False,
+        set_light: tuple[bool, int] | None = None,
     ) -> LanPrinterStatus:
-        """Connect over MQTT, query the printer and collect its reports."""
+        """Connect over MQTT, query the printer and collect its reports.
+
+        *start_camera*/*stop_camera* ask the printer to (un)publish its FLV
+        stream; when starting, the resulting ``camera_url`` (if the printer
+        answers in time) appears on the returned status. *set_light* is
+        ``(on, brightness)`` with brightness 0-100, applied before the
+        read-only queries so the printer's own report reflects the change.
+        """
         try:
             import paho.mqtt.client as mqtt  # noqa: PLC0415 - optional dependency
         except ImportError:
@@ -266,7 +310,7 @@ class AnycubicLanClient:
                 return
             with state_lock:
                 status.raw_topics.append(message.topic)
-                _apply_report(status, message.topic, payload)
+                _apply_report(status, message.topic, payload, creds.host)
 
         client = mqtt.Client(
             callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
@@ -306,16 +350,43 @@ class AnycubicLanClient:
                 base = (
                     f"{TOPIC_BASE}/web/printer/{creds.type_id}/{creds.printer_id}"
                 )
-                for _source, query_type, action in _QUERY_SPECS:
-                    payload = {
-                        "type": query_type,
-                        "action": action,
-                        "timestamp": int(time.time() * 1000),
-                        "msgid": str(uuid4()),
-                        "data": None,
-                    }
+
+                if start_camera:
                     client.publish(
-                        f"{base}/{query_type}", json.dumps(payload), qos=0
+                        f"{base}/video",
+                        json.dumps(_action_payload("video", "startCapture")),
+                        qos=0,
+                    )
+                if stop_camera:
+                    client.publish(
+                        f"{base}/video",
+                        json.dumps(_action_payload("video", "stopCapture")),
+                        qos=0,
+                    )
+                if set_light is not None:
+                    on, brightness = set_light
+                    effective = max(0, min(100, brightness)) if on else 0
+                    client.publish(
+                        f"{base}/light",
+                        json.dumps(
+                            _action_payload(
+                                "light",
+                                "control",
+                                {
+                                    "type": 3,
+                                    "status": 1 if effective else 0,
+                                    "brightness": effective,
+                                },
+                            )
+                        ),
+                        qos=0,
+                    )
+
+                for _source, query_type, action in _QUERY_SPECS:
+                    client.publish(
+                        f"{base}/{query_type}",
+                        json.dumps(_action_payload(query_type, action)),
+                        qos=0,
                     )
                 time.sleep(collect_seconds)
             finally:
@@ -337,10 +408,21 @@ class AnycubicLanClient:
             return status
 
 
+def _action_payload(message_type: str, action: str, data: dict[str, Any] | None = None) -> dict:
+    """Build a command/query payload in the shape the printer expects."""
+    return {
+        "type": message_type,
+        "action": action,
+        "timestamp": int(time.time() * 1000),
+        "msgid": str(uuid4()),
+        "data": data,
+    }
+
+
 # ------------------------------------------------------------------ parsing
 
 
-def _apply_report(status: LanPrinterStatus, topic: str, payload: dict) -> None:
+def _apply_report(status: LanPrinterStatus, topic: str, payload: dict, host: str = "") -> None:
     """Fold one printer report into *status* (tolerant of field variants)."""
     if not isinstance(payload, dict):
         return
@@ -400,6 +482,96 @@ def _apply_report(status: LanPrinterStatus, topic: str, payload: dict) -> None:
     model = pick("modelName", "model_name", "machineName")
     if isinstance(model, str) and not status.model_name:
         status.model_name = model
+
+    camera_available = pick("camera_available", "cameraAvailable")
+    if camera_available is not None:
+        status.camera_available = bool(camera_available)
+    if "light" in topic or str(payload.get("type", "")).lower() == "light":
+        brightness = pick("brightness")
+        light_status = pick("status")
+        if brightness is not None:
+            status.light_brightness = _as_int(brightness)
+            status.light_on = status.light_brightness > 0
+        elif light_status is not None:
+            status.light_on = bool(_as_int(light_status))
+    if "video" in topic or str(payload.get("type", "")).lower() == "video":
+        state = pick("state", "action")
+        if isinstance(state, str) and state:
+            status.camera_available = True
+    stream_url = _extract_stream_url(payload, host)
+    if stream_url:
+        status.camera_url = stream_url
+        status.camera_available = True
+
+    _apply_ace_report(status, data)
+
+
+def _apply_ace_report(status: LanPrinterStatus, data: dict) -> None:
+    """Fold ``multi_color_box`` (ACE unit) data into *status*, if present."""
+    boxes = data.get("multi_color_box")
+    if not isinstance(boxes, list) or not boxes:
+        return
+    box = boxes[0]
+    if not isinstance(box, dict):
+        return
+    status.ace_present = True
+
+    temp = box.get("temp")
+    if temp is not None:
+        status.ace_temp = _as_float(temp)
+    humidity = box.get("humidity")
+    if humidity is not None:
+        status.ace_humidity = _as_float(humidity)
+    loaded_slot = box.get("loaded_slot")
+    if loaded_slot is not None:
+        status.ace_loaded_slot = _as_int(loaded_slot)
+
+    slots = box.get("slots")
+    if not isinstance(slots, list):
+        return
+    parsed: list[AceSlot] = []
+    for slot in slots:
+        if not isinstance(slot, dict):
+            parsed.append(AceSlot())
+            continue
+        color_hex = ""
+        color = slot.get("color")
+        if isinstance(color, list) and len(color) >= 3:
+            try:
+                color_hex = "#{:02x}{:02x}{:02x}".format(
+                    int(color[0]), int(color[1]), int(color[2])
+                )
+            except (TypeError, ValueError):
+                color_hex = ""
+        parsed.append(
+            AceSlot(
+                material=str(slot.get("type") or ""),
+                status=str(slot.get("status") or ""),
+                percent=_as_float(slot.get("consumables_percent")),
+                weight=_as_float(slot.get("weight")),
+                sku=str(slot.get("sku") or ""),
+                color_hex=color_hex,
+            )
+        )
+    status.ace_slots = parsed
+
+
+def _extract_stream_url(payload: dict, host: str = "") -> str:
+    """Find a live-camera URL in a report, however it was embedded."""
+    text = json.dumps(payload)
+    match = _LIVE_URL_RE.search(text)
+    if match:
+        return match.group(0)
+
+    data = payload.get("data") if isinstance(payload.get("data"), dict) else payload
+    for key in ("streamUrl", "videoUrl", "flvUrl", "url"):
+        value = data.get(key)
+        if isinstance(value, str) and value.startswith(("http://", "https://")):
+            return value
+    token = data.get("token")
+    if isinstance(token, str) and token and host:
+        return f"http://{host}:{STREAM_HTTP_PORT}/live/{token}"
+    return ""
 
 
 # ------------------------------------------------------------------ helpers
