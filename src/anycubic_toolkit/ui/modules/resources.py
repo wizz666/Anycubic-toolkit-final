@@ -10,6 +10,8 @@ A single hub of useful destinations, opened in the system browser:
 * **Slicers** — software compatible with Anycubic Kobra printers, with the
   official Anycubic Slicer Next first.
 * **Anycubic** — official EU store, firmware/software and wiki.
+* **Fleet management** — for owners running many printers at once, a link to
+  a dedicated print-farm manager (this toolkit stays single-user by design).
 
 Only canonical, tracking-free URLs are used.
 """
@@ -54,6 +56,12 @@ _ANYCUBIC_LINKS = [
     ("Anycubic — Firmware & Software", firmware_url()),
     ("Anycubic Wiki", __anycubic_wiki__),
 ]
+# For users running many printers (a real "farm"), not just one or two — this
+# toolkit deliberately stays a single-user diagnostics app and doesn't try to
+# grow into a fleet-dispatch system, so it just points to a dedicated one.
+_FLEET_TOOLS = [
+    ("Print Farm Manager (GitHub)", "https://github.com/joeltelling/print-farm-manager"),
+]
 
 
 class ResourcesPage(ModulePage):
@@ -69,6 +77,7 @@ class ResourcesPage(ModulePage):
         self._add_section("resources.ai", "resources.ai_note", _AI_GENERATORS, _GLOBE)
         self._add_section("resources.slicers", "resources.slicers_note", _SLICERS, _DOWNLOAD)
         self._add_section("resources.anycubic", "resources.anycubic_note", _ANYCUBIC_LINKS, _GLOBE)
+        self._add_section("resources.fleet", "resources.fleet_note", _FLEET_TOOLS, _GLOBE)
         self.content_layout.addStretch(1)
 
     def _add_section(

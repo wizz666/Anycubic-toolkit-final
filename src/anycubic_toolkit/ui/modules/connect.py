@@ -15,18 +15,23 @@ Everything stays on the local network; nothing is sent to any cloud.
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any, Callable
 from uuid import uuid4
 
-from PySide6.QtCore import QTimer, QUrl, Signal
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtCore import Qt, QTimer, QUrl, Signal
+from PySide6.QtGui import QDesktopServices, QKeyEvent
 from PySide6.QtWidgets import (
     QCheckBox,
+    QFileDialog,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QPushButton,
     QVBoxLayout,
+    QWidget,
 )
 
 from anycubic_toolkit.core.anycubic_cloud import (
@@ -229,6 +234,123 @@ class _PrinterCard(Card):
         QDesktopServices.openUrl(QUrl(MoonrakerClient(self.host, DEFAULT_PORT).web_url()))
 
 
+class _WallTile(Card):
+    """One printer's status, shown at a larger, glance-from-across-the-room size."""
+
+    def __init__(self, parent=None) -> None:
+        super().__init__("", parent)
+        body = self.body_layout()
+        self.name_label = QLabel()
+        self.name_label.setObjectName("PageTitle")
+        self.state_label = QLabel()
+        state_font = self.state_label.font()
+        state_font.setPointSize(state_font.pointSize() + 3)
+        self.state_label.setFont(state_font)
+        self.temps_label = QLabel()
+        self.temps_label.setWordWrap(True)
+        self.print_label = QLabel()
+        self.print_label.setWordWrap(True)
+        for widget in (self.name_label, self.state_label, self.temps_label, self.print_label):
+            body.addWidget(widget)
+
+    def update_info(self, name: str, info: dict[str, str]) -> None:
+        self.name_label.setText(name)
+        self.state_label.setText(info.get("state", ""))
+        self.temps_label.setText(info.get("temps", ""))
+        self.print_label.setText(info.get("print", ""))
+
+
+class WallDashboardWindow(QWidget):
+    """A separate, resizable window with large printer tiles for a shop monitor.
+
+    Reads the same cached status the Connect page already fetches (via
+    *get_display*) on a short UI-only timer — it never triggers its own
+    network polling, so it can't double up requests to the printers.
+    """
+
+    def __init__(
+        self,
+        ctx,
+        get_display: Callable[[], dict[str, dict[str, str]]],
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent, Qt.WindowType.Window)
+        self.ctx = ctx
+        self._get_display = get_display
+        self._tiles: dict[str, _WallTile] = {}
+        self.resize(1000, 640)
+
+        outer = QVBoxLayout(self)
+        header = QHBoxLayout()
+        self.title_label = QLabel(self.tr_("connect.wall_title"))
+        self.title_label.setObjectName("PageTitle")
+        header.addWidget(self.title_label, 1)
+        self.fullscreen_btn = QPushButton(self.tr_("connect.wall_fullscreen"))
+        self.fullscreen_btn.clicked.connect(self._toggle_fullscreen)
+        header.addWidget(self.fullscreen_btn)
+        self.close_btn = QPushButton(self.tr_("common.close"))
+        self.close_btn.clicked.connect(self.close)
+        header.addWidget(self.close_btn)
+        outer.addLayout(header)
+
+        self.grid = QGridLayout()
+        self.grid.setSpacing(20)
+        outer.addLayout(self.grid)
+        outer.addStretch(1)
+
+        self.setWindowTitle(self.tr_("connect.wall_title"))
+        self._timer = QTimer(self)
+        self._timer.setInterval(3000)
+        self._timer.timeout.connect(self.refresh)
+        self._timer.start()
+        self.refresh()
+
+    def tr_(self, key: str, **kwargs: object) -> str:
+        return self.ctx.translator.tr(key, **kwargs)
+
+    def _toggle_fullscreen(self) -> None:
+        if self.isFullScreen():
+            self.showNormal()
+        else:
+            self.showFullScreen()
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802 - Qt override
+        if event.key() == Qt.Key.Key_Escape:
+            if self.isFullScreen():
+                self.showNormal()
+            else:
+                self.close()
+        else:
+            super().keyPressEvent(event)
+
+    def refresh(self) -> None:
+        printers = self.ctx.config.get("printers", []) or []
+        display = self._get_display()
+        seen: set[str] = set()
+        for entry in printers:
+            printer_id = str(entry.get("id", ""))
+            if not printer_id:
+                continue
+            seen.add(printer_id)
+            tile = self._tiles.get(printer_id)
+            if tile is None:
+                tile = _WallTile()
+                self._tiles[printer_id] = tile
+                index = len(self._tiles) - 1
+                self.grid.addWidget(tile, index // 2, index % 2)
+            name = str(entry.get("name") or entry.get("host", ""))
+            tile.update_info(name, display.get(printer_id, {}))
+        for printer_id in list(self._tiles.keys()):
+            if printer_id not in seen:
+                tile = self._tiles.pop(printer_id)
+                self.grid.removeWidget(tile)
+                tile.deleteLater()
+
+    def closeEvent(self, event) -> None:  # noqa: N802 - Qt override
+        self._timer.stop()
+        super().closeEvent(event)
+
+
 class ConnectPage(ModulePage):
     """Live status for every printer the user has added, via Moonraker or LAN mode."""
 
@@ -238,6 +360,8 @@ class ConnectPage(ModulePage):
 
     def build(self) -> None:
         self._cards: dict[str, _PrinterCard] = {}
+        self._latest_display: dict[str, dict[str, str]] = {}
+        self._wall_window: WallDashboardWindow | None = None
         self._history = PrintHistory()
         self._migrate_legacy_printer()
 
@@ -275,6 +399,22 @@ class ConnectPage(ModulePage):
         self.refresh_all_btn.clicked.connect(self._refresh_all)
         monitor_row.addWidget(self.refresh_all_btn)
         body.addLayout(monitor_row)
+
+        tools_row = QHBoxLayout()
+        self.export_btn = QPushButton()
+        self.export_btn.setObjectName("Link")
+        self.export_btn.clicked.connect(self._export_printers)
+        tools_row.addWidget(self.export_btn)
+        self.import_btn = QPushButton()
+        self.import_btn.setObjectName("Link")
+        self.import_btn.clicked.connect(self._import_printers)
+        tools_row.addWidget(self.import_btn)
+        tools_row.addStretch(1)
+        self.wall_btn = QPushButton()
+        self.wall_btn.setObjectName("Link")
+        self.wall_btn.clicked.connect(self._open_wall_dashboard)
+        tools_row.addWidget(self.wall_btn)
+        body.addLayout(tools_row)
 
         self.content_layout.addWidget(self.form_card)
 
@@ -352,6 +492,9 @@ class ConnectPage(ModulePage):
         self.refresh_all_btn.setText(
             "\N{ANTICLOCKWISE OPEN CIRCLE ARROW} " + self.tr_("connect.refresh_all")
         )
+        self.export_btn.setText("\N{FLOPPY DISK} " + self.tr_("connect.export"))
+        self.import_btn.setText("\N{OPEN FILE FOLDER} " + self.tr_("connect.import"))
+        self.wall_btn.setText("\N{TELEVISION} " + self.tr_("connect.wall_dashboard"))
         self.printers_title.setText(self.tr_("connect.live_title"))
         self.empty_label.setText(self.tr_("connect.empty"))
         for card in self._cards.values():
@@ -420,6 +563,76 @@ class ConnectPage(ModulePage):
             if entry.get("id") == printer_id:
                 return entry
         return None
+
+    # ---------------------------------------------------------- export/import
+
+    def _export_printers(self) -> None:
+        printers = self.ctx.config.get("printers", []) or []
+        path, _filter = QFileDialog.getSaveFileName(
+            self, self.tr_("connect.export"), "anycubic-toolkit-printers.json", "JSON (*.json)"
+        )
+        if not path:
+            return
+        # Only name/host — never LAN-mode credentials (device cert/key, MQTT
+        # password), which are per-pairing secrets and don't belong in a file
+        # meant to be backed up or shared.
+        data = [{"name": p.get("name", ""), "host": p.get("host", "")} for p in printers]
+        try:
+            Path(path).write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        except OSError as exc:
+            self.status_label.setText(self.tr_("connect.export_error", reason=str(exc)))
+            return
+        self.status_label.setText(self.tr_("connect.export_done", count=len(data), path=path))
+
+    def _import_printers(self) -> None:
+        path, _filter = QFileDialog.getOpenFileName(
+            self, self.tr_("connect.import"), "", "JSON (*.json)"
+        )
+        if not path:
+            return
+        try:
+            data = json.loads(Path(path).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            self.status_label.setText(self.tr_("connect.import_invalid"))
+            return
+        if not isinstance(data, list):
+            self.status_label.setText(self.tr_("connect.import_invalid"))
+            return
+
+        printers = list(self.ctx.config.get("printers", []) or [])
+        existing_hosts = {p.get("host", "").lower() for p in printers}
+        added = 0
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            host = str(item.get("host", "")).strip()
+            if not host or host.lower() in existing_hosts:
+                continue
+            entry = {"id": uuid4().hex[:8], "name": str(item.get("name", "")).strip(), "host": host}
+            printers.append(entry)
+            existing_hosts.add(host.lower())
+            added += 1
+            self._add_card(entry)
+
+        if added:
+            self.ctx.config.set("printers", printers)
+            self._sync_empty_state()
+            for entry in printers[-added:]:
+                self._refresh_printer(entry["id"], manual=True)
+        self.status_label.setText(self.tr_("connect.import_done", count=added))
+
+    # ---------------------------------------------------------- wall display
+
+    def _open_wall_dashboard(self) -> None:
+        if self._wall_window is None:
+            self._wall_window = WallDashboardWindow(self.ctx, lambda: self._latest_display, self)
+            self._wall_window.destroyed.connect(self._on_wall_window_closed)
+        self._wall_window.show()
+        self._wall_window.raise_()
+        self._wall_window.activateWindow()
+
+    def _on_wall_window_closed(self) -> None:
+        self._wall_window = None
 
     # ------------------------------------------------------------- fetching
 
@@ -494,11 +707,19 @@ class ConnectPage(ModulePage):
                 else "connect.offline"
             )
             self._show_offline(printer_id, self.tr_(key))
+            return
+        self._latest_display[printer_id] = {
+            "state": card.state_label.text(),
+            "mode": card.mode_label.text(),
+            "temps": card.temps_label.text(),
+            "print": card.print_label.text(),
+        }
 
     def _show_offline(self, printer_id: str, text: str) -> None:
         card = self._cards.get(printer_id)
         if card is not None:
             card.show_offline(text)
+        self._latest_display[printer_id] = {"state": text, "mode": "", "temps": "", "print": ""}
 
     # -------------------------------------------------------------- monitor
 
