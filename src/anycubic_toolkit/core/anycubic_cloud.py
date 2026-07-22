@@ -124,6 +124,7 @@ def _dig_for_token(data: Any) -> str:
 class CloudPrinter:
     """One printer as reported by the cloud (read-only snapshot)."""
 
+    id: str = ""  # stable identifier within the account, for re-matching later
     name: str = ""
     model: str = ""
     online: bool = False
@@ -242,6 +243,7 @@ def _parse_printer(entry: dict[str, Any]) -> CloudPrinter:
     )
 
     return CloudPrinter(
+        id=str(pick("id", "device_id", "deviceId", "sn", "printer_id") or ""),
         name=str(pick("name", "printer_name", "device_name") or ""),
         model=str(pick("model", "machine_name", "model_name") or ""),
         online=online,

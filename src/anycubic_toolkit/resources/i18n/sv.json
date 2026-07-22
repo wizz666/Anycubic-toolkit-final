@@ -167,6 +167,7 @@
     "offline": "Kunde inte nå skrivaren. Kontrollera IP:n och att Rinkhals/Moonraker körs.",
     "online": "Online",
     "temps": "Munstycke: {nozzle}°C / {nozzle_t}°C   •   Bädd: {bed}°C / {bed_t}°C",
+    "temps_cloud": "Munstycke: {nozzle}°C  •  Bädd: {bed}°C",
     "printing": "Skriver ut: {file} — {percent}%",
     "print_state": "Utskriftstillstånd: {state}",
     "open_moonraker": "Öppna Moonraker",
@@ -183,6 +184,7 @@
     "help": "Din skrivare kan nås över hemnätverket på två sätt. Kör den Rinkhals-firmware pratar appen med Moonraker. Kör den original-firmware (som Kobra X) aktiverar du <b>LAN-läge</b> i skrivarens inställningar så ansluter appen direkt — inget konto eller moln behövs. Lägg till varje skrivares IP-adress nedan (hittas i din router eller skrivarens nätverksmeny) — appen övervakar alla samtidigt. Första LAN-anslutningen parkopplas med varje skrivare en gång och kommer ihåg det. Vet du inte IP:n? Använd “Skanna nätverket” för att hitta skrivare automatiskt — det fungerar dock bara för skrivare på samma nätverkssegment som den här datorn. På skrivare i Anycubics LAN-läge med kamera eller ACE-enhet kan du även öppna livekameran och slå av/på belysningen, och ACE-facken visar material och återstående procent.",
     "mode_moonraker": "Ansluten via Moonraker (Rinkhals)",
     "mode_lan": "Ansluten via Anycubics LAN-läge (original-firmware)",
+    "mode_cloud": "Ansluten via Anycubic Cloud",
     "layers": "Lager {current}/{total}",
     "remaining": "{minutes} min kvar",
     "lan_missing_mqtt": "LAN-läge hittades, men MQTT-komponenten (paho-mqtt) saknas i det här bygget.",
@@ -199,12 +201,14 @@
     "wall_title": "Väggpanel för skrivare",
     "wall_fullscreen": "Helskärm",
     "cloud_title": "Anycubic Cloud (valfritt)",
-    "cloud_hint_token": "En inloggnings-token från Anycubic Slicer Next hittades på datorn. Hämta skrivarnas status via molnet nedan.",
+    "cloud_hint_token": "En inloggnings-token från Anycubic Slicer Next hittades på datorn. Lägg till dina molnskrivare nedan.",
     "cloud_hint_no_token": "Ingen inloggnings-token hittades. Logga in i Anycubic Slicer Next en gång på den här datorn, eller klistra in din access-token nedan.",
     "cloud_token_placeholder": "Access-token (från Anycubic Slicer Next)",
-    "cloud_fetch": "Hämta molnstatus",
+    "cloud_add": "Lägg till molnskrivare",
     "cloud_error": "Molnanropet misslyckades: {reason}",
-    "cloud_no_printers": "Inga skrivare hittades på kontot."
+    "cloud_no_printers": "Inga skrivare hittades på kontot.",
+    "cloud_picker_title": "Hittade molnskrivare",
+    "cloud_picker_intro": "Hittade {count} skrivare på ditt Anycubic-konto. Välj vilka som ska läggas till:"
   },
   "health": {
     "title": "Skrivarhälsa",

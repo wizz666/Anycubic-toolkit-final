@@ -167,6 +167,7 @@
     "offline": "Could not reach the printer. Check the IP and that Rinkhals/Moonraker is running.",
     "online": "Online",
     "temps": "Nozzle: {nozzle}°C / {nozzle_t}°C   •   Bed: {bed}°C / {bed_t}°C",
+    "temps_cloud": "Nozzle: {nozzle}°C  •  Bed: {bed}°C",
     "printing": "Printing: {file} — {percent}%",
     "print_state": "Print state: {state}",
     "open_moonraker": "Open Moonraker",
@@ -183,6 +184,7 @@
     "help": "Your printer can be reached over your home network in two ways. If it runs the Rinkhals custom firmware, the app talks to Moonraker. If it runs the original firmware (like the Kobra X), enable <b>LAN mode</b> in the printer's settings and the app connects directly — no account or cloud needed. Add each printer's IP address below (find it in your router or the printer's network menu) — the app monitors all of them at once. The first LAN-mode connection pairs with each printer once and remembers it. Don't know the IP? Use “Scan network” to find printers automatically — though that only works for printers on the same network segment as this computer. On Anycubic LAN-mode printers with a camera or ACE unit, you can also open the live camera view and toggle the chamber light, and ACE filament slots show their material and remaining percentage.",
     "mode_moonraker": "Connected via Moonraker (Rinkhals)",
     "mode_lan": "Connected via Anycubic LAN mode (stock firmware)",
+    "mode_cloud": "Connected via Anycubic Cloud",
     "layers": "Layer {current}/{total}",
     "remaining": "{minutes} min remaining",
     "lan_missing_mqtt": "LAN mode found, but the MQTT component (paho-mqtt) is missing from this build.",
@@ -199,12 +201,14 @@
     "wall_title": "Printer Wall Dashboard",
     "wall_fullscreen": "Fullscreen",
     "cloud_title": "Anycubic Cloud (optional)",
-    "cloud_hint_token": "A login token from Anycubic Slicer Next was found on this computer. Fetch your printers’ status via the cloud below.",
+    "cloud_hint_token": "A login token from Anycubic Slicer Next was found on this computer. Add your cloud printers below.",
     "cloud_hint_no_token": "No login token found. Log in to Anycubic Slicer Next once on this computer, or paste your access token below.",
     "cloud_token_placeholder": "Access token (from Anycubic Slicer Next)",
-    "cloud_fetch": "Fetch cloud status",
+    "cloud_add": "Add cloud printers",
     "cloud_error": "Cloud request failed: {reason}",
-    "cloud_no_printers": "No printers found on this account."
+    "cloud_no_printers": "No printers found on this account.",
+    "cloud_picker_title": "Cloud printers found",
+    "cloud_picker_intro": "Found {count} printer(s) on your Anycubic account. Pick which ones to add:"
   },
   "health": {
     "title": "Printer Health",

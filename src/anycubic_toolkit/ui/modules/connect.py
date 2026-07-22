@@ -282,6 +282,29 @@ class _PrinterCard(Card):
             self.light_btn.setVisible(False)
         self.camera_btn.setVisible(bool(status.camera_available))
 
+    def show_cloud(self, printer: CloudPrinter) -> None:
+        """Display a read-only cloud snapshot (no LAN-only controls apply here)."""
+        tr = self._tr or (lambda key, **_kw: key)
+        self.mode_label.setText(tr("connect.mode_cloud"))
+        self.moonraker_btn.setVisible(False)
+        self.web_btn.setVisible(False)
+        self.light_btn.setVisible(False)
+        self.camera_btn.setVisible(False)
+        self.ace_label.setVisible(False)
+
+        state_text = printer.print_state or ("online" if printer.online else "offline")
+        self.state_label.setText(
+            (tr("connect.online") + f" — {state_text}") if printer.online else tr("connect.offline")
+        )
+        self.versions_label.setText(printer.model)
+        self.temps_label.setText(tr("connect.temps_cloud", nozzle=printer.nozzle_temp, bed=printer.bed_temp))
+        if printer.is_printing:
+            self.print_label.setText(
+                tr("connect.printing", file=printer.filename or "?", percent=int(printer.progress * 100))
+            )
+        else:
+            self.print_label.setText(tr("connect.print_state", state=printer.print_state or "idle"))
+
     @property
     def is_light_on(self) -> bool:
         return bool(self._light_on)
@@ -412,24 +435,29 @@ class WallDashboardWindow(QWidget):
         super().closeEvent(event)
 
 
-class ScanResultsDialog(QDialog):
-    """Lets the user pick which network-scan hits to add as printers."""
+class SelectionDialog(QDialog):
+    """Generic checkable list picker — used for scan results and cloud printers."""
 
-    def __init__(self, hits: list[ScanHit], tr: Callable[..., str], parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        title: str,
+        intro: str,
+        labels: list[str],
+        accept_text: str,
+        close_text: str,
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
-        self._hits = hits
-        self.setWindowTitle(tr("connect.scan_results_title"))
+        self.setWindowTitle(title)
 
         layout = QVBoxLayout(self)
-        intro = QLabel(tr("connect.scan_results_intro", count=len(hits)))
-        intro.setWordWrap(True)
-        layout.addWidget(intro)
+        intro_label = QLabel(intro)
+        intro_label.setWordWrap(True)
+        layout.addWidget(intro_label)
 
         self.list_widget = QListWidget()
-        for hit in hits:
-            mode_text = tr("connect.mode_moonraker" if hit.mode == "moonraker" else "connect.mode_lan")
-            label = hit.host if not hit.name else f"{hit.host} — {hit.name}"
-            item = QListWidgetItem(f"{label}  ({mode_text})")
+        for label in labels:
+            item = QListWidgetItem(label)
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             item.setCheckState(Qt.CheckState.Checked)
             self.list_widget.addItem(item)
@@ -437,20 +465,20 @@ class ScanResultsDialog(QDialog):
 
         buttons = QHBoxLayout()
         buttons.addStretch(1)
-        cancel_btn = QPushButton(tr("common.close"))
+        cancel_btn = QPushButton(close_text)
         cancel_btn.clicked.connect(self.reject)
         buttons.addWidget(cancel_btn)
-        add_btn = QPushButton(tr("connect.scan_add_selected"))
-        add_btn.setObjectName("Primary")
-        add_btn.clicked.connect(self.accept)
-        buttons.addWidget(add_btn)
+        accept_btn = QPushButton(accept_text)
+        accept_btn.setObjectName("Primary")
+        accept_btn.clicked.connect(self.accept)
+        buttons.addWidget(accept_btn)
         layout.addLayout(buttons)
 
         self.resize(440, 320)
 
-    def selected_hits(self) -> list[ScanHit]:
+    def selected_indices(self) -> list[int]:
         return [
-            self._hits[i]
+            i
             for i in range(self.list_widget.count())
             if self.list_widget.item(i).checkState() == Qt.CheckState.Checked
         ]
@@ -558,14 +586,12 @@ class ConnectPage(ModulePage):
         cloud_row = QHBoxLayout()
         self.cloud_token_input = QLineEdit()
         self.cloud_token_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self.cloud_fetch_btn = QPushButton()
-        self.cloud_fetch_btn.clicked.connect(self._cloud_fetch)
+        self.cloud_add_btn = QPushButton()
+        self.cloud_add_btn.setObjectName("Primary")
+        self.cloud_add_btn.clicked.connect(self._add_cloud_printers)
         cloud_row.addWidget(self.cloud_token_input, 1)
-        cloud_row.addWidget(self.cloud_fetch_btn)
+        cloud_row.addWidget(self.cloud_add_btn)
         cbody.addLayout(cloud_row)
-        self.cloud_result = QLabel()
-        self.cloud_result.setWordWrap(True)
-        cbody.addWidget(self.cloud_result)
         self.cloud_card.setVisible(False)
         self.content_layout.addWidget(self.cloud_card)
         self.content_layout.addStretch(1)
@@ -615,7 +641,7 @@ class ConnectPage(ModulePage):
             card.retranslate(self.tr_)
         self.cloud_card.set_title(self.tr_("connect.cloud_title"))
         self.cloud_token_input.setPlaceholderText(self.tr_("connect.cloud_token_placeholder"))
-        self.cloud_fetch_btn.setText("\N{CLOUD} " + self.tr_("connect.cloud_fetch"))
+        self.cloud_add_btn.setText("\N{CLOUD} " + self.tr_("connect.cloud_add"))
         self._sync_cloud_card()
 
     # ------------------------------------------------------------- printers
@@ -689,10 +715,15 @@ class ConnectPage(ModulePage):
         )
         if not path:
             return
-        # Only name/host — never LAN-mode credentials (device cert/key, MQTT
-        # password), which are per-pairing secrets and don't belong in a file
-        # meant to be backed up or shared.
-        data = [{"name": p.get("name", ""), "host": p.get("host", "")} for p in printers]
+        # Only name/host, and only IP-based printers — never LAN-mode
+        # credentials (device cert/key, MQTT password), which are per-pairing
+        # secrets, and never cloud entries (re-added via "Add cloud printers"
+        # instead, since they need re-matching against the account anyway).
+        data = [
+            {"name": p.get("name", ""), "host": p.get("host", "")}
+            for p in printers
+            if p.get("kind") != "cloud"
+        ]
         try:
             Path(path).write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
         except OSError as exc:
@@ -772,12 +803,24 @@ class ConnectPage(ModulePage):
             self.status_label.setText(self.tr_("connect.scan_all_already_added", count=len(hits)))
             return
 
-        dialog = ScanResultsDialog(new_hits, self.tr_, self)
+        labels = []
+        for hit in new_hits:
+            mode_text = self.tr_("connect.mode_moonraker" if hit.mode == "moonraker" else "connect.mode_lan")
+            label = hit.host if not hit.name else f"{hit.host} — {hit.name}"
+            labels.append(f"{label}  ({mode_text})")
+        dialog = SelectionDialog(
+            self.tr_("connect.scan_results_title"),
+            self.tr_("connect.scan_results_intro", count=len(new_hits)),
+            labels,
+            self.tr_("connect.scan_add_selected"),
+            self.tr_("common.close"),
+            self,
+        )
         if dialog.exec() != QDialog.DialogCode.Accepted:
             self.status_label.setText("")
             return
 
-        selected = dialog.selected_hits()
+        selected = [new_hits[i] for i in dialog.selected_indices()]
         printers = list(self.ctx.config.get("printers", []) or [])
         new_entries = []
         for hit in selected:
@@ -820,6 +863,9 @@ class ConnectPage(ModulePage):
         entry = self._entry_by_id(printer_id)
         card = self._cards.get(printer_id)
         if entry is None or card is None:
+            return
+        if entry.get("kind") == "cloud":
+            self._refresh_cloud_printer(printer_id, entry, manual=manual)
             return
         host = str(entry.get("host", ""))
         if manual:
@@ -977,41 +1023,115 @@ class ConnectPage(ModulePage):
 
     # ---------------------------------------------------------------- cloud
 
-    def _cloud_fetch(self) -> None:
+    def _add_cloud_printers(self) -> None:
         token = self.cloud_token_input.text().strip()
         if not token:
-            self.cloud_result.setText(self.tr_("connect.cloud_hint_no_token"))
+            self.status_label.setText(self.tr_("connect.cloud_hint_no_token"))
             return
         self.ctx.config.set("cloud_access_token", token)
-        self.cloud_result.setText(self.tr_("connect.connecting"))
-        worker = FunctionWorker(self._cloud_status, token)
-        worker.signals.finished.connect(self._show_cloud)
-        worker.signals.error.connect(
-            lambda msg: self.cloud_result.setText(
-                self.tr_("connect.cloud_error", reason=msg)
+        self.cloud_add_btn.setEnabled(False)
+        self.status_label.setText(self.tr_("connect.connecting"))
+        worker = FunctionWorker(self._fetch_cloud_list, token)
+        worker.signals.finished.connect(self._on_cloud_list_fetched)
+        worker.signals.error.connect(self._on_cloud_list_error)
+        run_in_background(worker)
+
+    def _fetch_cloud_list(self, token: str) -> list[CloudPrinter]:
+        return AnycubicCloudClient(token).printers()
+
+    def _on_cloud_list_error(self, message: str) -> None:
+        self.cloud_add_btn.setEnabled(True)
+        self.status_label.setText(self.tr_("connect.cloud_error", reason=message))
+
+    def _on_cloud_list_fetched(self, printers: list[CloudPrinter]) -> None:
+        self.cloud_add_btn.setEnabled(True)
+        if not printers:
+            self.status_label.setText(self.tr_("connect.cloud_no_printers"))
+            return
+
+        existing_ids = {
+            p.get("cloud_id")
+            for p in (self.ctx.config.get("printers", []) or [])
+            if p.get("kind") == "cloud"
+        }
+        new_printers = [p for p in printers if p.id and p.id not in existing_ids]
+        if not new_printers:
+            self.status_label.setText(
+                self.tr_("connect.scan_all_already_added", count=len(printers))
             )
+            return
+
+        labels = []
+        for printer in new_printers:
+            name = printer.name or printer.model or "?"
+            suffix = f" — {printer.model}" if printer.model and printer.model != name else ""
+            labels.append(f"{name}{suffix}")
+        dialog = SelectionDialog(
+            self.tr_("connect.cloud_picker_title"),
+            self.tr_("connect.cloud_picker_intro", count=len(new_printers)),
+            labels,
+            self.tr_("connect.scan_add_selected"),
+            self.tr_("common.close"),
+            self,
+        )
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            self.status_label.setText("")
+            return
+
+        selected = [new_printers[i] for i in dialog.selected_indices()]
+        printers_cfg = list(self.ctx.config.get("printers", []) or [])
+        for printer in selected:
+            entry = {
+                "id": uuid4().hex[:8],
+                "name": printer.name or printer.model,
+                "kind": "cloud",
+                "cloud_id": printer.id,
+            }
+            printers_cfg.append(entry)
+            self._add_card(entry)
+            self._show_cloud_result(entry["id"], printer)
+        if selected:
+            self.ctx.config.set("printers", printers_cfg)
+            self._sync_empty_state()
+        self.status_label.setText(self.tr_("connect.scan_added", count=len(selected)))
+
+    def _refresh_cloud_printer(self, printer_id: str, entry: dict[str, Any], manual: bool = False) -> None:
+        card = self._cards.get(printer_id)
+        if card is None:
+            return
+        token = str(self.ctx.config.get("cloud_access_token", "") or "").strip()
+        if not token:
+            card.show_offline(self.tr_("connect.cloud_hint_no_token"))
+            return
+        if manual:
+            card.show_connecting(self.tr_("connect.connecting"))
+        cloud_id = str(entry.get("cloud_id", ""))
+        worker = FunctionWorker(self._fetch_one_cloud_printer, token, cloud_id)
+        worker.signals.finished.connect(
+            lambda printer, pid=printer_id: self._show_cloud_result(pid, printer)
+        )
+        worker.signals.error.connect(
+            lambda msg, pid=printer_id: self._show_offline(pid, self.tr_("connect.cloud_error", reason=msg))
         )
         run_in_background(worker)
 
-    def _cloud_status(self, token: str) -> list[CloudPrinter]:
-        client = AnycubicCloudClient(token)
-        return client.printers()
+    def _fetch_one_cloud_printer(self, token: str, cloud_id: str) -> CloudPrinter | None:
+        for printer in AnycubicCloudClient(token).printers():
+            if printer.id == cloud_id:
+                return printer
+        return None
 
-    def _show_cloud(self, printers: list[CloudPrinter]) -> None:
-        if not printers:
-            self.cloud_result.setText(self.tr_("connect.cloud_no_printers"))
+    def _show_cloud_result(self, printer_id: str, printer: CloudPrinter | None) -> None:
+        card = self._cards.get(printer_id)
+        if card is None:
             return
-        lines = []
-        for printer in printers:
-            name = printer.name or printer.model or "?"
-            state = printer.print_state or ("online" if printer.online else "offline")
-            line = f"\N{PRINTER} <b>{name}</b> — {state}"
-            if printer.is_printing:
-                line += f" ({int(printer.progress * 100)}%"
-                if printer.filename:
-                    line += f", {printer.filename}"
-                line += ")"
-            if printer.nozzle_temp or printer.bed_temp:
-                line += f"  \N{BULLET} {printer.nozzle_temp}°C / {printer.bed_temp}°C"
-            lines.append(line)
-        self.cloud_result.setText("<br>".join(lines))
+        if printer is None:
+            self._show_offline(printer_id, self.tr_("connect.offline"))
+            return
+        card.show_cloud(printer)
+        self._latest_display[printer_id] = {
+            "state": card.state_label.text(),
+            "mode": card.mode_label.text(),
+            "temps": card.temps_label.text(),
+            "print": card.print_label.text(),
+        }

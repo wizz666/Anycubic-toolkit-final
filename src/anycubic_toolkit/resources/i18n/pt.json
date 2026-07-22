@@ -167,6 +167,7 @@
     "offline": "Não foi possível contactar a impressora. Verifique o IP e se o Rinkhals/Moonraker está ativo.",
     "online": "Online",
     "temps": "Bico: {nozzle}°C / {nozzle_t}°C   •   Base: {bed}°C / {bed_t}°C",
+    "temps_cloud": "Bico: {nozzle}°C  •  Base: {bed}°C",
     "printing": "A imprimir: {file} — {percent}%",
     "print_state": "Estado de impressão: {state}",
     "open_moonraker": "Abrir Moonraker",
@@ -183,6 +184,7 @@
     "help": "A impressora é acessível pela sua rede local de duas formas. Se usa o firmware Rinkhals, a app comunica com o Moonraker. Se usa o firmware original (como a Kobra X), ative o <b>modo LAN</b> nas definições da impressora e a app liga-se diretamente — sem conta nem nuvem. Adicione o IP de cada impressora abaixo (no router ou no menu de rede) — a app monitoriza todas ao mesmo tempo. A primeira ligação LAN emparelha uma vez com cada impressora e fica memorizada. Não sabe o IP? Use “Procurar na rede” para encontrar impressoras automaticamente — embora isso só funcione para impressoras no mesmo segmento de rede que este computador. Em impressoras no modo LAN da Anycubic com câmara ou unidade ACE, também pode abrir a vista da câmara em direto e alternar a luz da câmara, e as ranhuras ACE mostram o material e a percentagem restante.",
     "mode_moonraker": "Ligado por Moonraker (Rinkhals)",
     "mode_lan": "Ligado pelo modo LAN da Anycubic (firmware original)",
+    "mode_cloud": "Ligado através da Anycubic Cloud",
     "layers": "Camada {current}/{total}",
     "remaining": "Faltam {minutes} min",
     "lan_missing_mqtt": "Modo LAN encontrado, mas falta o componente MQTT (paho-mqtt) nesta compilação.",
@@ -199,12 +201,14 @@
     "wall_title": "Painel de parede das impressoras",
     "wall_fullscreen": "Ecrã inteiro",
     "cloud_title": "Anycubic Cloud (opcional)",
-    "cloud_hint_token": "Foi encontrado um token do Anycubic Slicer Next neste computador. Obtenha o estado das impressoras pela nuvem abaixo.",
+    "cloud_hint_token": "Foi encontrado um token do Anycubic Slicer Next neste computador. Adicione as suas impressoras na nuvem abaixo.",
     "cloud_hint_no_token": "Nenhum token encontrado. Inicie sessão uma vez no Anycubic Slicer Next neste computador, ou cole o seu token de acesso abaixo.",
     "cloud_token_placeholder": "Token de acesso (do Anycubic Slicer Next)",
-    "cloud_fetch": "Obter estado da nuvem",
+    "cloud_add": "Adicionar impressoras na nuvem",
     "cloud_error": "O pedido à nuvem falhou: {reason}",
-    "cloud_no_printers": "Nenhuma impressora encontrada nesta conta."
+    "cloud_no_printers": "Nenhuma impressora encontrada nesta conta.",
+    "cloud_picker_title": "Impressoras na nuvem encontradas",
+    "cloud_picker_intro": "Encontradas {count} impressora(s) na sua conta Anycubic. Escolha quais adicionar:"
   },
   "health": {
     "title": "Saúde da impressora",
