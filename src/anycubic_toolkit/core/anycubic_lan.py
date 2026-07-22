@@ -124,10 +124,14 @@ class LanCredentials:
             return None
 
 
-def probe_lan_mode(host: str) -> bool:
-    """True when the printer answers on the LAN control port (LAN mode on)."""
+def probe_lan_mode(host: str, timeout: float = _HTTP_TIMEOUT) -> bool:
+    """True when the printer answers on the LAN control port (LAN mode on).
+
+    *timeout* defaults to the normal per-host timeout; network scanning
+    passes a much shorter one so probing ~250 addresses stays fast.
+    """
     try:
-        _http_json(f"http://{_clean_host(host)}:{CTRL_HTTP_PORT}/info")
+        _http_json(f"http://{_clean_host(host)}:{CTRL_HTTP_PORT}/info", timeout=timeout)
     except LanError:
         return False
     return True
@@ -412,12 +416,12 @@ def _md5(value: str) -> str:
     return hashlib.md5(value.encode()).hexdigest()
 
 
-def _http_json(url: str, method: str = "GET") -> dict:
+def _http_json(url: str, method: str = "GET", timeout: float = _HTTP_TIMEOUT) -> dict:
     request = urllib.request.Request(
         url, method=method, headers={"User-Agent": _USER_AGENT}
     )
     try:
-        with urllib.request.urlopen(request, timeout=_HTTP_TIMEOUT) as response:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
             charset = response.headers.get_content_charset() or "utf-8"
             payload = json.loads(response.read().decode(charset, errors="replace"))
     except (urllib.error.URLError, TimeoutError, OSError) as exc:

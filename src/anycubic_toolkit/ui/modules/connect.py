@@ -24,11 +24,14 @@ from PySide6.QtCore import Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices, QKeyEvent
 from PySide6.QtWidgets import (
     QCheckBox,
+    QDialog,
     QFileDialog,
     QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -49,6 +52,7 @@ from anycubic_toolkit.core.anycubic_lan import (
 from anycubic_toolkit.core.ha_publisher import HaConfig, HomeAssistantPublisher
 from anycubic_toolkit.core.monitor import PrinterMonitor
 from anycubic_toolkit.core.moonraker import DEFAULT_PORT, MoonrakerClient, PrinterStatus
+from anycubic_toolkit.core.network_scan import ScanHit, local_subnet_prefix, scan_subnet
 from anycubic_toolkit.core.notifications import Notifier, NotifierConfig
 from anycubic_toolkit.core.print_history import PrintHistory
 from anycubic_toolkit.core import telemetry
@@ -351,6 +355,50 @@ class WallDashboardWindow(QWidget):
         super().closeEvent(event)
 
 
+class ScanResultsDialog(QDialog):
+    """Lets the user pick which network-scan hits to add as printers."""
+
+    def __init__(self, hits: list[ScanHit], tr: Callable[..., str], parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._hits = hits
+        self.setWindowTitle(tr("connect.scan_results_title"))
+
+        layout = QVBoxLayout(self)
+        intro = QLabel(tr("connect.scan_results_intro", count=len(hits)))
+        intro.setWordWrap(True)
+        layout.addWidget(intro)
+
+        self.list_widget = QListWidget()
+        for hit in hits:
+            mode_text = tr("connect.mode_moonraker" if hit.mode == "moonraker" else "connect.mode_lan")
+            label = hit.host if not hit.name else f"{hit.host} — {hit.name}"
+            item = QListWidgetItem(f"{label}  ({mode_text})")
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(Qt.CheckState.Checked)
+            self.list_widget.addItem(item)
+        layout.addWidget(self.list_widget)
+
+        buttons = QHBoxLayout()
+        buttons.addStretch(1)
+        cancel_btn = QPushButton(tr("common.close"))
+        cancel_btn.clicked.connect(self.reject)
+        buttons.addWidget(cancel_btn)
+        add_btn = QPushButton(tr("connect.scan_add_selected"))
+        add_btn.setObjectName("Primary")
+        add_btn.clicked.connect(self.accept)
+        buttons.addWidget(add_btn)
+        layout.addLayout(buttons)
+
+        self.resize(440, 320)
+
+    def selected_hits(self) -> list[ScanHit]:
+        return [
+            self._hits[i]
+            for i in range(self.list_widget.count())
+            if self.list_widget.item(i).checkState() == Qt.CheckState.Checked
+        ]
+
+
 class ConnectPage(ModulePage):
     """Live status for every printer the user has added, via Moonraker or LAN mode."""
 
@@ -384,6 +432,14 @@ class ConnectPage(ModulePage):
         add_row.addWidget(self.host_input, 1)
         add_row.addWidget(self.add_btn)
         body.addLayout(add_row)
+
+        scan_row = QHBoxLayout()
+        self.scan_btn = QPushButton()
+        self.scan_btn.setObjectName("Link")
+        self.scan_btn.clicked.connect(self._scan_network)
+        scan_row.addWidget(self.scan_btn)
+        scan_row.addStretch(1)
+        body.addLayout(scan_row)
 
         self.status_label = QLabel()
         self.status_label.setObjectName("Muted")
@@ -488,6 +544,7 @@ class ConnectPage(ModulePage):
         self.name_input.setPlaceholderText(self.tr_("connect.name_placeholder"))
         self.host_input.setPlaceholderText(self.tr_("connect.host_placeholder"))
         self.add_btn.setText("\N{ELECTRIC PLUG} " + self.tr_("connect.add"))
+        self.scan_btn.setText("\N{LEFT-POINTING MAGNIFYING GLASS} " + self.tr_("connect.scan"))
         self.monitor_check.setText(self.tr_("connect.monitor"))
         self.refresh_all_btn.setText(
             "\N{ANTICLOCKWISE OPEN CIRCLE ARROW} " + self.tr_("connect.refresh_all")
@@ -620,6 +677,62 @@ class ConnectPage(ModulePage):
             for entry in printers[-added:]:
                 self._refresh_printer(entry["id"], manual=True)
         self.status_label.setText(self.tr_("connect.import_done", count=added))
+
+    # ------------------------------------------------------------------ scan
+
+    def _scan_network(self) -> None:
+        prefix = local_subnet_prefix()
+        if not prefix:
+            self.status_label.setText(self.tr_("connect.scan_no_network"))
+            return
+        self.scan_btn.setEnabled(False)
+        self.status_label.setText(self.tr_("connect.scanning", progress="0/254"))
+        worker = FunctionWorker(scan_subnet, prefix)
+        worker.signals.progress.connect(self._on_scan_progress)
+        worker.signals.finished.connect(self._on_scan_finished)
+        worker.signals.error.connect(self._on_scan_error)
+        run_in_background(worker)
+
+    def _on_scan_progress(self, _percent: int, description: str) -> None:
+        self.status_label.setText(self.tr_("connect.scanning", progress=description))
+
+    def _on_scan_error(self, message: str) -> None:
+        self.scan_btn.setEnabled(True)
+        self.status_label.setText(self.tr_("connect.scan_error", reason=message))
+
+    def _on_scan_finished(self, hits: list[ScanHit]) -> None:
+        self.scan_btn.setEnabled(True)
+        printers = self.ctx.config.get("printers", []) or []
+        existing_hosts = {p.get("host", "").lower() for p in printers}
+        new_hits = [h for h in hits if h.host.lower() not in existing_hosts]
+
+        if not hits:
+            self.status_label.setText(self.tr_("connect.scan_none_found"))
+            return
+        if not new_hits:
+            self.status_label.setText(self.tr_("connect.scan_all_already_added", count=len(hits)))
+            return
+
+        dialog = ScanResultsDialog(new_hits, self.tr_, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            self.status_label.setText("")
+            return
+
+        selected = dialog.selected_hits()
+        printers = list(self.ctx.config.get("printers", []) or [])
+        new_entries = []
+        for hit in selected:
+            entry = {"id": uuid4().hex[:8], "name": hit.name, "host": hit.host}
+            printers.append(entry)
+            new_entries.append(entry)
+            self._add_card(entry)
+
+        if new_entries:
+            self.ctx.config.set("printers", printers)
+            self._sync_empty_state()
+            for entry in new_entries:
+                self._refresh_printer(entry["id"], manual=True)
+        self.status_label.setText(self.tr_("connect.scan_added", count=len(new_entries)))
 
     # ---------------------------------------------------------- wall display
 
