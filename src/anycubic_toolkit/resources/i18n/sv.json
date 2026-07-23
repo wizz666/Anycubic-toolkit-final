@@ -249,6 +249,10 @@
     "slicers_note": "Anycubic Slicer Next (OrcaSlicer-baserad) är officiell för Kobra-serien. OrcaSlicer är bästa alternativet; Cura och PrusaSlicer fungerar också med rätt profil.",
     "anycubic": "Anycubic",
     "anycubic_note": "Officiell Anycubic EU-butik, firmware/mjukvara och wiki.",
+    "community": "Community",
+    "community_note": "Rinkhals egna projektsidor, samt Anycubics officiella Discord- och Reddit-communities.",
+    "guides": "Guider",
+    "guides_note": "En välkänd felsökningsguide för utskriftskvalitet, samt Anycubics egna sidor om ACE/flerfärgsutskrift.",
     "fleet": "Skrivarpark",
     "fleet_note": "Kör du många skrivare samtidigt? Den här verktygslådan fokuserar på en maskin i taget — för riktig jobbkö och skrivarparkshantering, prova ett dedikerat verktyg:",
     "help": "Praktiska länkar för din skrivare: var du laddar ner modeller, AI-verktyg som gör text eller bilder till 3D-modeller, slicer-program (som gör en modell till en fil skrivaren kan skriva ut), och officiella Anycubic-sidor. Allt öppnas i din webbläsare."

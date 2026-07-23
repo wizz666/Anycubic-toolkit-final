@@ -10,6 +10,10 @@ A single hub of useful destinations, opened in the system browser:
 * **Slicers** — software compatible with Anycubic Kobra printers, with the
   official Anycubic Slicer Next first.
 * **Anycubic** — official EU store, firmware/software and wiki.
+* **Community** — Rinkhals (the custom-firmware project this toolkit already
+  reads firmware catalogs from) plus Anycubic's own Discord and Reddit.
+* **Guides** — a well-known print-quality troubleshooting reference and
+  Anycubic's own ACE / multi-color wiki pages.
 * **Fleet management** — for owners running many printers at once, a link to
   a dedicated print-farm manager (this toolkit stays single-user by design).
 
@@ -23,6 +27,7 @@ from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QLabel, QPushButton, QVBoxLayout
 
 from anycubic_toolkit import __anycubic_wiki__
+from anycubic_toolkit.core.rinkhals import RINKHALS_DOCS, RINKHALS_HOME
 from anycubic_toolkit.core.websources import firmware_url, makeronline_url
 from anycubic_toolkit.ui.modules.base import ModulePage
 from anycubic_toolkit.ui.widgets import Card
@@ -62,6 +67,20 @@ _ANYCUBIC_LINKS = [
 _FLEET_TOOLS = [
     ("Print Farm Manager (GitHub)", "https://github.com/joeltelling/print-farm-manager"),
 ]
+_COMMUNITY_LINKS = [
+    ("Rinkhals (GitHub)", RINKHALS_HOME),
+    ("Rinkhals Docs", RINKHALS_DOCS),
+    ("Anycubic Community (Discord)", "https://discord.com/invite/anycubic-community-966957505580236851"),
+    ("Anycubic Community (Reddit)", "https://www.reddit.com/r/AnycubicOfficial/"),
+]
+_GUIDE_LINKS = [
+    ("Print Quality Troubleshooting Guide", "https://www.simplify3d.com/resources/print-quality-troubleshooting/"),
+    ("Anycubic ACE / Multi-Color Guide", "https://wiki.anycubic.com/en/fdm-3d-printer/ace-pro"),
+    (
+        "Multi-Color Printing in Anycubic Slicer",
+        "https://wiki.anycubic.com/en/software-and-app/anycubicslicer/multi-color-printing",
+    ),
+]
 
 
 class ResourcesPage(ModulePage):
@@ -77,6 +96,8 @@ class ResourcesPage(ModulePage):
         self._add_section("resources.ai", "resources.ai_note", _AI_GENERATORS, _GLOBE)
         self._add_section("resources.slicers", "resources.slicers_note", _SLICERS, _DOWNLOAD)
         self._add_section("resources.anycubic", "resources.anycubic_note", _ANYCUBIC_LINKS, _GLOBE)
+        self._add_section("resources.community", "resources.community_note", _COMMUNITY_LINKS, _GLOBE)
+        self._add_section("resources.guides", "resources.guides_note", _GUIDE_LINKS, _GLOBE)
         self._add_section("resources.fleet", "resources.fleet_note", _FLEET_TOOLS, _GLOBE)
         self.content_layout.addStretch(1)
 

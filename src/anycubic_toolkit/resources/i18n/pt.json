@@ -249,6 +249,10 @@
     "slicers_note": "O Anycubic Slicer Next (baseado no OrcaSlicer) é oficial para a série Kobra. O OrcaSlicer é a melhor alternativa; o Cura e o PrusaSlicer também funcionam com o perfil certo.",
     "anycubic": "Anycubic",
     "anycubic_note": "Loja oficial Anycubic EU, firmware/software e wiki.",
+    "community": "Comunidade",
+    "community_note": "As páginas do próprio projeto Rinkhals, além das comunidades oficiais da Anycubic no Discord e no Reddit.",
+    "guides": "Guias",
+    "guides_note": "Um guia muito conhecido para resolver problemas de qualidade de impressão, além das páginas da própria Anycubic sobre ACE / impressão multicolor.",
     "fleet": "Gestão de frota",
     "fleet_note": "Tem muitas impressoras ao mesmo tempo? Esta ferramenta mantém o foco numa máquina de cada vez — para gestão real de frota e fila de trabalhos, experimente uma ferramenta dedicada:",
     "help": "Ligações úteis para a impressora: onde transferir modelos, ferramentas de IA que criam modelos 3D a partir de texto ou imagens, programas de slicing e páginas oficiais da Anycubic. Tudo abre no seu navegador."
