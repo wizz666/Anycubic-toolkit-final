@@ -208,7 +208,11 @@
     "cloud_error": "Molnanropet misslyckades: {reason}",
     "cloud_no_printers": "Inga skrivare hittades på kontot.",
     "cloud_picker_title": "Hittade molnskrivare",
-    "cloud_picker_intro": "Hittade {count} skrivare på ditt Anycubic-konto. Välj vilka som ska läggas till:"
+    "cloud_picker_intro": "Hittade {count} skrivare på ditt Anycubic-konto. Välj vilka som ska läggas till:",
+    "cloud_auto_refresh": "Auto-uppdatera",
+    "cloud_every_5": "Var 5:e minut",
+    "cloud_every_10": "Var 10:e minut",
+    "cloud_refresh_note": "Stäng av auto-uppdatering för att bara uppdatera molnskrivare när du klickar på uppdatera."
   },
   "health": {
     "title": "Skrivarhälsa",

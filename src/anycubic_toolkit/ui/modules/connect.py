@@ -24,6 +24,7 @@ from PySide6.QtCore import Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices, QKeyEvent
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QDialog,
     QFileDialog,
     QGridLayout,
@@ -592,17 +593,45 @@ class ConnectPage(ModulePage):
         cloud_row.addWidget(self.cloud_token_input, 1)
         cloud_row.addWidget(self.cloud_add_btn)
         cbody.addLayout(cloud_row)
+
+        cloud_refresh_row = QHBoxLayout()
+        self.cloud_auto_refresh_check = QCheckBox()
+        self.cloud_auto_refresh_check.toggled.connect(self._on_cloud_auto_refresh_toggled)
+        cloud_refresh_row.addWidget(self.cloud_auto_refresh_check, 1)
+        self.cloud_refresh_interval = QComboBox()
+        self.cloud_refresh_interval.addItem("", 5)
+        self.cloud_refresh_interval.addItem("", 10)
+        self.cloud_refresh_interval.currentIndexChanged.connect(
+            self._on_cloud_refresh_interval_changed
+        )
+        cloud_refresh_row.addWidget(self.cloud_refresh_interval)
+        cbody.addLayout(cloud_refresh_row)
+        self.cloud_refresh_note = QLabel()
+        self.cloud_refresh_note.setObjectName("Muted")
+        self.cloud_refresh_note.setWordWrap(True)
+        cbody.addWidget(self.cloud_refresh_note)
+
         self.cloud_card.setVisible(False)
         self.content_layout.addWidget(self.cloud_card)
         self.content_layout.addStretch(1)
+
+        self._cloud_poll_timer = QTimer(self)
+        self._cloud_poll_timer.timeout.connect(self._poll_cloud)
+
+        self.cloud_auto_refresh_check.setChecked(bool(self.ctx.config.get("cloud_auto_refresh", True)))
+        saved_minutes = int(self.ctx.config.get("cloud_refresh_minutes", 5) or 5)
+        interval_idx = self.cloud_refresh_interval.findData(saved_minutes)
+        self.cloud_refresh_interval.setCurrentIndex(interval_idx if interval_idx >= 0 else 0)
 
         for entry in self.ctx.config.get("printers", []) or []:
             self._add_card(entry)
             self._refresh_printer(entry.get("id", ""))
         self._sync_empty_state()
+        self._apply_cloud_poll_timer()
 
     def on_shown(self) -> None:
         self._sync_cloud_card()
+        self._apply_cloud_poll_timer()
 
     def _sync_cloud_card(self) -> None:
         enabled = bool(self.ctx.config.get("cloud_enabled"))
@@ -642,6 +671,10 @@ class ConnectPage(ModulePage):
         self.cloud_card.set_title(self.tr_("connect.cloud_title"))
         self.cloud_token_input.setPlaceholderText(self.tr_("connect.cloud_token_placeholder"))
         self.cloud_add_btn.setText("\N{CLOUD} " + self.tr_("connect.cloud_add"))
+        self.cloud_auto_refresh_check.setText(self.tr_("connect.cloud_auto_refresh"))
+        self.cloud_refresh_interval.setItemText(0, self.tr_("connect.cloud_every_5"))
+        self.cloud_refresh_interval.setItemText(1, self.tr_("connect.cloud_every_10"))
+        self.cloud_refresh_note.setText(self.tr_("connect.cloud_refresh_note"))
         self._sync_cloud_card()
 
     # ------------------------------------------------------------- printers
@@ -686,6 +719,7 @@ class ConnectPage(ModulePage):
             self.printers_layout.removeWidget(card)
             card.deleteLater()
         self._sync_empty_state()
+        self._apply_cloud_poll_timer()
 
     def _add_card(self, entry: dict[str, Any]) -> None:
         card = _PrinterCard(entry)
@@ -856,8 +890,45 @@ class ConnectPage(ModulePage):
             self._refresh_printer(printer_id, manual=True)
 
     def _poll_all(self) -> None:
+        # Cloud printers have their own, much slower poll timer (see
+        # _poll_cloud) — polling Anycubic's cloud API every 20s like a local
+        # printer would be wasteful and risks rate limits.
         for printer_id in list(self._cards.keys()):
+            entry = self._entry_by_id(printer_id)
+            if entry is not None and entry.get("kind") == "cloud":
+                continue
             self._refresh_printer(printer_id)
+
+    def _poll_cloud(self) -> None:
+        for printer_id in list(self._cards.keys()):
+            entry = self._entry_by_id(printer_id)
+            if entry is not None and entry.get("kind") == "cloud":
+                self._refresh_printer(printer_id)
+
+    def _has_cloud_printers(self) -> bool:
+        return any(
+            p.get("kind") == "cloud" for p in (self.ctx.config.get("printers", []) or [])
+        )
+
+    def _apply_cloud_poll_timer(self) -> None:
+        enabled = self.cloud_auto_refresh_check.isChecked()
+        minutes = int(self.cloud_refresh_interval.currentData() or 5)
+        if enabled and self._has_cloud_printers():
+            self._cloud_poll_timer.setInterval(minutes * 60_000)
+            if not self._cloud_poll_timer.isActive():
+                self._cloud_poll_timer.start()
+        else:
+            self._cloud_poll_timer.stop()
+
+    def _on_cloud_auto_refresh_toggled(self, checked: bool) -> None:
+        self.ctx.config.set("cloud_auto_refresh", checked)
+        self._apply_cloud_poll_timer()
+
+    def _on_cloud_refresh_interval_changed(self, _index: int) -> None:
+        minutes = self.cloud_refresh_interval.currentData()
+        if minutes:
+            self.ctx.config.set("cloud_refresh_minutes", int(minutes))
+        self._apply_cloud_poll_timer()
 
     def _refresh_printer(self, printer_id: str, manual: bool = False) -> None:
         entry = self._entry_by_id(printer_id)
@@ -1008,6 +1079,8 @@ class ConnectPage(ModulePage):
             snap = telemetry.from_moonraker(status, host)
         elif mode == "lan" and isinstance(status, LanPrinterStatus) and status.online:
             snap = telemetry.from_lan(status, host)
+        elif mode == "cloud" and isinstance(status, CloudPrinter) and status.online:
+            snap = telemetry.from_cloud(status, host)
         if snap is not None:
             self._monitor().ingest(snap)
 
@@ -1093,6 +1166,7 @@ class ConnectPage(ModulePage):
         if selected:
             self.ctx.config.set("printers", printers_cfg)
             self._sync_empty_state()
+            self._apply_cloud_poll_timer()
         self.status_label.setText(self.tr_("connect.scan_added", count=len(selected)))
 
     def _refresh_cloud_printer(self, printer_id: str, entry: dict[str, Any], manual: bool = False) -> None:
@@ -1129,6 +1203,7 @@ class ConnectPage(ModulePage):
             self._show_offline(printer_id, self.tr_("connect.offline"))
             return
         card.show_cloud(printer)
+        self._feed_monitor(printer_id, "cloud", printer)
         self._latest_display[printer_id] = {
             "state": card.state_label.text(),
             "mode": card.mode_label.text(),

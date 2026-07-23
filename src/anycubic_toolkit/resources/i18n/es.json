@@ -208,7 +208,11 @@
     "cloud_error": "La solicitud a la nube falló: {reason}",
     "cloud_no_printers": "No se encontraron impresoras en esta cuenta.",
     "cloud_picker_title": "Impresoras en la nube encontradas",
-    "cloud_picker_intro": "Se encontraron {count} impresora(s) en tu cuenta de Anycubic. Elige cuáles añadir:"
+    "cloud_picker_intro": "Se encontraron {count} impresora(s) en tu cuenta de Anycubic. Elige cuáles añadir:",
+    "cloud_auto_refresh": "Actualización automática",
+    "cloud_every_5": "Cada 5 min",
+    "cloud_every_10": "Cada 10 min",
+    "cloud_refresh_note": "Desactiva la actualización automática para actualizar las impresoras en la nube solo al pulsar actualizar."
   },
   "health": {
     "title": "Salud de la impresora",
