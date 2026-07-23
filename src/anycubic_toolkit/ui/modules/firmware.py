@@ -38,6 +38,8 @@ class FirmwareCenterPage(ModulePage):
         self._catalog: list[dict[str, Any]] = []
         self._loaded = False
         self._rinkhals = RinkhalsClient()
+        self._user_selected_model = False
+        self._last_seen_analysis: Any = None
 
         self.installed_card = Card()
         ibody = self.installed_card.body_layout()
@@ -134,25 +136,34 @@ class FirmwareCenterPage(ModulePage):
     # ------------------------------------------------------------- internal
 
     def _effective_code(self) -> str:
-        """Model from the analyzed log, else the manually selected model."""
-        analysis = self.ctx.last_analysis
-        if analysis is not None and analysis.model_code:
-            return analysis.model_code
-        return str(self.ctx.config.get("printer_model_code", "") or "")
+        """The model whose firmware catalog is currently browsed (combo selection)."""
+        return self.model_combo.currentData() or ""
 
     def _sync_model_combo(self) -> None:
-        """Reflect the current model in the combo; lock it when a log detected one."""
+        """Pre-fill the log-detected model once; otherwise keep the user's own pick.
+
+        The dropdown always stays interactive — owning more than one printer
+        model means you may want to browse another model's firmware without
+        having analyzed a log for it first.
+        """
         analysis = self.ctx.last_analysis
+        if analysis is not None and analysis is not self._last_seen_analysis:
+            # A freshly analyzed log is trustworthy new info: let it take
+            # over again even if the user had picked something else before.
+            self._last_seen_analysis = analysis
+            self._user_selected_model = False
         detected = analysis.model_code if analysis else ""
-        code = detected or str(self.ctx.config.get("printer_model_code", "") or "")
+        if detected and not self._user_selected_model:
+            code = detected
+        else:
+            code = str(self.ctx.config.get("printer_model_code", "") or "")
         index = self.model_combo.findData(code)
         self.model_combo.blockSignals(True)
         self.model_combo.setCurrentIndex(index if index >= 0 else 0)
-        # If a log detected the model, the manual selector is redundant.
-        self.model_combo.setEnabled(not detected)
         self.model_combo.blockSignals(False)
 
     def _on_model_changed(self, _index: int) -> None:
+        self._user_selected_model = True
         code = self.model_combo.currentData() or ""
         self.ctx.config.set("printer_model_code", code)
         self._loaded = False
