@@ -87,6 +87,20 @@ class MoonrakerClient:
             self._apply_objects(status, objects.get("status", {}))
         return status
 
+    # ------------------------------------------------------------- controls
+
+    def pause_print(self) -> bool:
+        """Pause the running print. Returns True when Moonraker accepted it."""
+        return self._post("/printer/print/pause")
+
+    def resume_print(self) -> bool:
+        """Resume a paused print."""
+        return self._post("/printer/print/resume")
+
+    def cancel_print(self) -> bool:
+        """Cancel (stop) the running print."""
+        return self._post("/printer/print/cancel")
+
     # ------------------------------------------------------------- internal
 
     @staticmethod
@@ -107,6 +121,17 @@ class MoonrakerClient:
         display = objects.get("display_status", {})
         if isinstance(display, dict):
             status.print_progress = _as_float(display.get("progress"))
+
+    def _post(self, path: str) -> bool:
+        url = f"{self.base_url()}{path}"
+        request = urllib.request.Request(
+            url, method="POST", headers={"User-Agent": _USER_AGENT}
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                return 200 <= response.status < 300
+        except (urllib.error.URLError, TimeoutError, OSError):
+            return False
 
     def _get(self, path: str) -> dict | None:
         url = f"{self.base_url()}{path}"

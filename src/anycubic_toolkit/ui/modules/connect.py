@@ -46,6 +46,7 @@ from anycubic_toolkit.core.anycubic_cloud import (
 from anycubic_toolkit.core.anycubic_lan import (
     AnycubicLanClient,
     LanCredentials,
+    LanError,
     LanPrinterStatus,
     probe_lan_mode,
     provision,
@@ -60,6 +61,47 @@ from anycubic_toolkit.core import telemetry
 from anycubic_toolkit.core.workers import FunctionWorker, run_in_background
 from anycubic_toolkit.ui.modules.base import ModulePage
 from anycubic_toolkit.ui.widgets import Card
+
+
+def _find_lan_match(prefix: str, cloud_model: str) -> str:
+    """Look for a LAN-mode printer on the local subnet whose provisioned
+    model matches *cloud_model*, for the "link this cloud printer to full
+    local control" suggestion. Runs entirely off the UI thread (a subnet
+    scan plus provisioning calls). Returns the matching host, or "" if none
+    found.
+
+    The cloud API only offers read-only status (no known control endpoint —
+    real control goes over cloud MQTT, which needs a client certificate
+    baked into Anycubic's own compiled apps, not something this project
+    extracts). Pairing a cloud entry with the same printer's LAN-mode
+    connection is what actually gets pause/resume/stop and the live temp
+    graph working for it, without needing the user to hunt down the IP
+    themselves.
+    """
+    hits = [hit for hit in scan_subnet(prefix) if hit.mode == "lan"]
+    if not hits:
+        return ""
+
+    target = (cloud_model or "").strip().lower()
+    provisioned: list[tuple[ScanHit, str]] = []
+    for hit in hits:
+        try:
+            creds = provision(hit.host)
+        except LanError:
+            continue
+        provisioned.append((hit, (creds.model_name or "").strip().lower()))
+
+    if target:
+        for hit, model in provisioned:
+            if model and (model == target or model in target or target in model):
+                return hit.host
+
+    # No confident model match (or the cloud API didn't report one) - if
+    # exactly one LAN-mode printer answered at all, it's still very likely
+    # the same one on a typical home network with a couple of printers.
+    if len(hits) == 1:
+        return hits[0].host
+    return ""
 
 
 class _PrinterCard(Card):
@@ -497,6 +539,7 @@ class ConnectPage(ModulePage):
         self._latest_display: dict[str, dict[str, str]] = {}
         self._wall_window: WallDashboardWindow | None = None
         self._history = PrintHistory()
+        self._lan_link_checking: set[str] = set()  # cloud entry ids, this session only
         self._migrate_legacy_printer()
 
         self.form_card = Card()
@@ -584,6 +627,10 @@ class ConnectPage(ModulePage):
         self.cloud_hint.setObjectName("Muted")
         self.cloud_hint.setWordWrap(True)
         cbody.addWidget(self.cloud_hint)
+        self.cloud_exclusive_note = QLabel()
+        self.cloud_exclusive_note.setObjectName("Muted")
+        self.cloud_exclusive_note.setWordWrap(True)
+        cbody.addWidget(self.cloud_exclusive_note)
         cloud_row = QHBoxLayout()
         self.cloud_token_input = QLineEdit()
         self.cloud_token_input.setEchoMode(QLineEdit.EchoMode.Password)
@@ -632,6 +679,7 @@ class ConnectPage(ModulePage):
     def on_shown(self) -> None:
         self._sync_cloud_card()
         self._apply_cloud_poll_timer()
+        self._check_cloud_lan_links()
 
     def _sync_cloud_card(self) -> None:
         enabled = bool(self.ctx.config.get("cloud_enabled"))
@@ -669,6 +717,9 @@ class ConnectPage(ModulePage):
         for card in self._cards.values():
             card.retranslate(self.tr_)
         self.cloud_card.set_title(self.tr_("connect.cloud_title"))
+        self.cloud_exclusive_note.setText(
+            "\N{INFORMATION SOURCE} " + self.tr_("connect.cloud_exclusive_note")
+        )
         self.cloud_token_input.setPlaceholderText(self.tr_("connect.cloud_token_placeholder"))
         self.cloud_add_btn.setText("\N{CLOUD} " + self.tr_("connect.cloud_add"))
         self.cloud_auto_refresh_check.setText(self.tr_("connect.cloud_auto_refresh"))
@@ -1168,6 +1219,75 @@ class ConnectPage(ModulePage):
             self._sync_empty_state()
             self._apply_cloud_poll_timer()
         self.status_label.setText(self.tr_("connect.scan_added", count=len(selected)))
+        self._check_cloud_lan_links()
+
+    # ---------------------------------------------------- cloud/LAN linking
+
+    def _check_cloud_lan_links(self) -> None:
+        """For every cloud printer that hasn't been checked yet (this run),
+        look for the same model on the local network and, if found, offer to
+        add it too — giving that printer full local control (pause/resume/
+        stop, live temps) alongside its cloud (away-from-home) status."""
+        prefix = local_subnet_prefix()
+        if not prefix:
+            return
+        for entry in self.ctx.config.get("printers", []) or []:
+            if entry.get("kind") != "cloud" or entry.get("lan_link_checked"):
+                continue
+            entry_id = entry.get("id", "")
+            if not entry_id or entry_id in self._lan_link_checking:
+                continue
+            self._lan_link_checking.add(entry_id)
+            model = str(entry.get("model") or entry.get("name") or "")
+            worker = FunctionWorker(_find_lan_match, prefix, model)
+            worker.signals.finished.connect(
+                lambda host, eid=entry_id: self._on_lan_link_result(eid, host)
+            )
+            worker.signals.error.connect(lambda _msg, eid=entry_id: self._mark_lan_link_checked(eid))
+            run_in_background(worker)
+
+    def _on_lan_link_result(self, cloud_entry_id: str, host: str) -> None:
+        self._mark_lan_link_checked(cloud_entry_id)
+        if not host:
+            return
+        printers = self.ctx.config.get("printers", []) or []
+        if any(p.get("host", "").lower() == host.lower() for p in printers):
+            return  # already added by some other path in the meantime
+        entry = self._entry_by_id(cloud_entry_id)
+        if entry is None:
+            return
+        name = str(entry.get("name") or host)
+
+        dialog = SelectionDialog(
+            self.tr_("connect.lan_link_title"),
+            self.tr_("connect.lan_link_intro", name=name, host=host),
+            [self.tr_("connect.lan_link_option", host=host)],
+            self.tr_("connect.lan_link_add"),
+            self.tr_("common.close"),
+            self,
+        )
+        if dialog.exec() != QDialog.DialogCode.Accepted or not dialog.selected_indices():
+            return
+
+        printers = list(self.ctx.config.get("printers", []) or [])
+        new_entry = {"id": uuid4().hex[:8], "name": name, "host": host}
+        printers.append(new_entry)
+        self.ctx.config.set("printers", printers)
+        self._add_card(new_entry)
+        self._sync_empty_state()
+        self._refresh_printer(new_entry["id"], manual=True)
+        self.status_label.setText(self.tr_("connect.lan_link_added", name=name))
+
+    def _mark_lan_link_checked(self, cloud_entry_id: str) -> None:
+        self._lan_link_checking.discard(cloud_entry_id)
+        printers = list(self.ctx.config.get("printers", []) or [])
+        changed = False
+        for entry in printers:
+            if entry.get("id") == cloud_entry_id and not entry.get("lan_link_checked"):
+                entry["lan_link_checked"] = True
+                changed = True
+        if changed:
+            self.ctx.config.set("printers", printers)
 
     def _refresh_cloud_printer(self, printer_id: str, entry: dict[str, Any], manual: bool = False) -> None:
         card = self._cards.get(printer_id)

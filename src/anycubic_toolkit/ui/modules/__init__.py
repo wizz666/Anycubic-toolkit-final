@@ -1,6 +1,7 @@
 """Sidebar module pages."""
 
 from anycubic_toolkit.ui.modules.about import AboutPage
+from anycubic_toolkit.ui.modules.bambu_import import BambuImportPage
 from anycubic_toolkit.ui.modules.base import AppContext, ModulePage
 from anycubic_toolkit.ui.modules.connect import ConnectPage
 from anycubic_toolkit.ui.modules.dashboard import DashboardPage
@@ -18,6 +19,7 @@ from anycubic_toolkit.ui.modules.support_report import SupportReportPage
 __all__ = [
     "AboutPage",
     "AppContext",
+    "BambuImportPage",
     "ConnectPage",
     "DashboardPage",
     "ErrorLookupPage",

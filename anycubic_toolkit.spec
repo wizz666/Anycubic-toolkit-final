@@ -36,7 +36,13 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=["tkinter", "PySide6.QtWebEngineCore", "PySide6.Qt3DCore"],
+    # scipy is explicitly excluded even though trimesh can optionally use it
+    # (and it may be installed in a dev venv for unrelated ad-hoc scripting):
+    # trimesh's connected-components code falls back to networkx (already a
+    # hard dependency) when scipy isn't importable, and scipy alone is ~135MB
+    # of the bundle - PyInstaller's static analysis would pull it in "just in
+    # case" from trimesh's own try/except import if it's merely installed.
+    excludes=["tkinter", "PySide6.QtWebEngineCore", "PySide6.Qt3DCore", "scipy"],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,

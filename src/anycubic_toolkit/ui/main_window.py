@@ -31,6 +31,7 @@ from anycubic_toolkit.core.workers import FunctionWorker, run_in_background
 from anycubic_toolkit.ui.modules import (
     AboutPage,
     AppContext,
+    BambuImportPage,
     ConnectPage,
     DashboardPage,
     ErrorLookupPage,
@@ -170,6 +171,7 @@ class MainWindow(QWidget):
             ("sidebar.errors", "\N{HEAVY EXCLAMATION MARK SYMBOL}", lambda: ErrorLookupPage(self.ctx)),
             ("sidebar.printer_info", "\N{PRINTER}", lambda: PrinterInfoPage(self.ctx)),
             ("sidebar.firmware", "\N{FLOPPY DISK}", lambda: FirmwareCenterPage(self.ctx)),
+            ("sidebar.bambu_import", "\N{PACKAGE}", lambda: BambuImportPage(self.ctx)),
             ("sidebar.rinkhals", "\N{PENGUIN}", lambda: RinkhalsPage(self.ctx)),
             ("sidebar.connect", "\N{ELECTRIC PLUG}", lambda: ConnectPage(self.ctx)),
             ("sidebar.health", "\N{BEATING HEART}", lambda: HealthPage(self.ctx)),

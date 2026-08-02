@@ -17,6 +17,9 @@ build/
 dist/
 *.manifest
 
+# Inno Setup build output (installer/*.iss is source, output/ is generated)
+installer/output/
+
 # Packaging
 *.zip
 *.tar.gz

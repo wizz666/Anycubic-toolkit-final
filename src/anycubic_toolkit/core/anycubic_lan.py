@@ -118,7 +118,7 @@ class LanCredentials:
         }
 
     @staticmethod
-    def from_dict(data: dict[str, Any]) -> "LanCredentials | None":
+    def from_dict(data: dict[str, Any]) -> LanCredentials | None:
         try:
             return LanCredentials(
                 host=str(data["host"]),
@@ -251,6 +251,7 @@ class LanPrinterStatus:
     ace_loaded_slot: int = -1  # -1: none loaded / unknown
     ace_slots: list[AceSlot] = field(default_factory=list)
     raw_topics: list[str] = field(default_factory=list)
+    task_id: str = ""  # current print job id, needed for pause/resume/stop
 
 
 class AnycubicLanClient:
@@ -407,6 +408,90 @@ class AnycubicLanClient:
             status.online = True
             return status
 
+    def send_print_command(self, action: str, task_id: str = "") -> str:
+        """Publish a print control command (``pause`` / ``resume`` / ``stop``).
+
+        Opens a short-lived MQTT session, publishes to the printer's ``print``
+        topic and waits briefly so the broker accepts the message before
+        disconnecting. Returns an empty string on success or an error code
+        (mirroring :class:`LanPrinterStatus.error` values) on failure. The
+        printer identifies the job by *task_id*, captured from its own print
+        reports — commands without it are still sent (some firmwares accept
+        them for the active job).
+        """
+        if action not in ("pause", "resume", "stop"):
+            return f"unsupported-action: {action}"
+        try:
+            import paho.mqtt.client as mqtt  # noqa: PLC0415 - optional dependency
+        except ImportError:
+            return "paho-missing"
+
+        creds = self.credentials
+        connected = threading.Event()
+        rejected = threading.Event()
+
+        def on_connect(client, _userdata, _flags, reason_code, _properties=None):
+            if getattr(reason_code, "is_failure", False) or (
+                isinstance(reason_code, int) and reason_code != 0
+            ):
+                rejected.set()
+            connected.set()
+
+        client = mqtt.Client(
+            callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
+            client_id=f"anycubic-toolkit-cmd-{uuid4().hex[:12]}",
+            protocol=mqtt.MQTTv311,
+        )
+        client.username_pw_set(creds.username, creds.password)
+
+        context = ssl.create_default_context()
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+        cert_path = key_path = None
+        try:
+            try:
+                if creds.device_cert and creds.device_key:
+                    cert_path = _temp_pem(creds.device_cert)
+                    key_path = _temp_pem(creds.device_key)
+                    context.load_cert_chain(cert_path, key_path)
+                client.tls_set_context(context)
+                client.tls_insecure_set(True)
+            except (ssl.SSLError, OSError, ValueError) as exc:
+                return f"tls: {exc}"
+            client.on_connect = on_connect
+            try:
+                client.connect(creds.host, MQTT_PORT, keepalive=15)
+            except (OSError, TimeoutError) as exc:
+                return f"unreachable: {exc}"
+            client.loop_start()
+            try:
+                if not connected.wait(timeout=_MQTT_CONNECT_TIMEOUT):
+                    return "timeout"
+                if rejected.is_set():
+                    return "rejected"
+                base = f"{TOPIC_BASE}/web/printer/{creds.type_id}/{creds.printer_id}"
+                data: dict[str, Any] = {"taskid": task_id} if task_id else {}
+                info = client.publish(
+                    f"{base}/print",
+                    json.dumps(_action_payload("print", action, data)),
+                    qos=1,
+                )
+                info.wait_for_publish(timeout=5)
+                return "" if info.is_published() else "publish-failed"
+            finally:
+                client.loop_stop()
+                try:
+                    client.disconnect()
+                except Exception:  # noqa: BLE001 - teardown is best-effort
+                    pass
+        finally:
+            for path in (cert_path, key_path):
+                if path:
+                    try:
+                        os.unlink(path)
+                    except OSError:
+                        pass
+
 
 def _action_payload(message_type: str, action: str, data: dict[str, Any] | None = None) -> dict:
     """Build a command/query payload in the shape the printer expects."""
@@ -443,6 +528,10 @@ def _apply_report(status: LanPrinterStatus, topic: str, payload: dict, host: str
     filename = pick("filename", "printName", "file", "taskName")
     if isinstance(filename, str):
         status.print_filename = filename
+
+    task_id = pick("taskid", "task_id", "taskId")
+    if task_id not in (None, ""):
+        status.task_id = str(task_id)
 
     progress = pick("progress", "printProgress")
     if progress is not None:
@@ -538,9 +627,7 @@ def _apply_ace_report(status: LanPrinterStatus, data: dict) -> None:
         color = slot.get("color")
         if isinstance(color, list) and len(color) >= 3:
             try:
-                color_hex = "#{:02x}{:02x}{:02x}".format(
-                    int(color[0]), int(color[1]), int(color[2])
-                )
+                color_hex = f"#{int(color[0]):02x}{int(color[1]):02x}{int(color[2]):02x}"
             except (TypeError, ValueError):
                 color_hex = ""
         parsed.append(

@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QDragEnterEvent, QDropEvent
+from PySide6.QtGui import QColor, QDragEnterEvent, QDropEvent, QPainter, QPaintEvent, QPen
 from PySide6.QtWidgets import (
     QFrame,
     QLabel,
@@ -100,16 +100,26 @@ class ScoreBar(QWidget):
 
 
 class DropZone(QFrame):
-    """Dashed drop target that accepts a single file via drag & drop."""
+    """Dashed drop target that accepts one or more files/folders via drag &
+    drop.
+
+    ``file_dropped`` fires with the first path for existing single-file
+    callers; pass ``multiple=True`` to also get every dropped path (files and
+    folders both) via ``files_dropped``.
+    """
 
     file_dropped = Signal(str)
+    files_dropped = Signal(list)
 
-    def __init__(self, hint: str = "", parent: QWidget | None = None) -> None:
+    def __init__(
+        self, hint: str = "", parent: QWidget | None = None, *, multiple: bool = False
+    ) -> None:
         super().__init__(parent)
         self.setObjectName("Card")
         self.setAcceptDrops(True)
         self.setMinimumHeight(150)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._multiple = multiple
         layout = QVBoxLayout(self)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.icon_label = QLabel("\N{OPEN FILE FOLDER}")
@@ -133,10 +143,11 @@ class DropZone(QFrame):
 
     def dropEvent(self, event: QDropEvent) -> None:  # noqa: N802
         urls = event.mimeData().urls()
-        if urls:
-            local = urls[0].toLocalFile()
-            if local:
-                self.file_dropped.emit(local)
+        locals_ = [u.toLocalFile() for u in urls if u.toLocalFile()]
+        if locals_:
+            if self._multiple:
+                self.files_dropped.emit(locals_)
+            self.file_dropped.emit(locals_[0])
         event.acceptProposedAction()
 
 
@@ -153,3 +164,93 @@ def clear_layout(layout) -> None:
 
 # Type alias for retranslation callbacks used across pages.
 Retranslate = Callable[[], None]
+
+
+class TempGraph(QWidget):
+    """Rolling line chart of nozzle and bed temperatures.
+
+    Feed it one reading at a time with :meth:`add_sample`; it keeps the most
+    recent *max_samples* points and paints two solid lines (current temps) plus
+    dashed target lines. Colors follow the classic convention — warm orange for
+    the nozzle, cool blue for the bed — and are readable on both themes.
+    """
+
+    NOZZLE_COLOR = "#ff8c42"
+    BED_COLOR = "#4f9dff"
+    GRID_COLOR = "#80808040"
+
+    def __init__(self, max_samples: int = 120, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._max = max(10, max_samples)
+        self._samples: list[tuple[float, float, float, float]] = []
+        self.setMinimumHeight(140)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+    def clear(self) -> None:
+        """Drop all samples (e.g. when switching printers)."""
+        self._samples.clear()
+        self.update()
+
+    def add_sample(
+        self, nozzle: float, bed: float, nozzle_target: float = 0.0, bed_target: float = 0.0
+    ) -> None:
+        """Append one reading and repaint."""
+        self._samples.append((nozzle, bed, nozzle_target, bed_target))
+        if len(self._samples) > self._max:
+            del self._samples[: len(self._samples) - self._max]
+        self.update()
+
+    def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802 - Qt override
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        rect = self.rect().adjusted(6, 6, -6, -18)
+        if rect.width() <= 0 or rect.height() <= 0:
+            return
+
+        peak = 60.0
+        for nozzle, bed, nt, bt in self._samples:
+            peak = max(peak, nozzle, bed, nt, bt)
+        peak *= 1.1
+
+        grid_pen = QPen(QColor(self.GRID_COLOR))
+        grid_pen.setWidth(1)
+        painter.setPen(grid_pen)
+        steps = 4
+        for i in range(steps + 1):
+            y = rect.bottom() - rect.height() * i / steps
+            painter.drawLine(rect.left(), int(y), rect.right(), int(y))
+            label = f"{peak * i / steps:.0f}\N{DEGREE SIGN}"
+            painter.drawText(rect.left() + 2, int(y) - 3, label)
+
+        if len(self._samples) < 2:
+            return
+
+        def x_at(index: int) -> float:
+            return rect.left() + rect.width() * index / (self._max - 1)
+
+        def y_at(value: float) -> float:
+            return rect.bottom() - rect.height() * min(value, peak) / peak
+
+        series = (
+            (0, self.NOZZLE_COLOR, Qt.PenStyle.SolidLine, 2),   # nozzle temp
+            (1, self.BED_COLOR, Qt.PenStyle.SolidLine, 2),      # bed temp
+            (2, self.NOZZLE_COLOR, Qt.PenStyle.DashLine, 1),    # nozzle target
+            (3, self.BED_COLOR, Qt.PenStyle.DashLine, 1),       # bed target
+        )
+        start = self._max - len(self._samples)
+        for column, color, style, width in series:
+            values = [sample[column] for sample in self._samples]
+            if column >= 2 and not any(values):
+                continue  # skip flat zero target lines
+            pen = QPen(QColor(color))
+            pen.setWidthF(width)
+            pen.setStyle(style)
+            painter.setPen(pen)
+            previous = None
+            for index, value in enumerate(values):
+                point = (x_at(start + index), y_at(value))
+                if previous is not None:
+                    painter.drawLine(
+                        int(previous[0]), int(previous[1]), int(point[0]), int(point[1])
+                    )
+                previous = point
