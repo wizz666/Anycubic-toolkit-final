@@ -174,7 +174,8 @@
     "open_hint": "Dubbelklicka på en rad för att öppna den i din slicer.",
     "failed": "Konvertering misslyckades: {reason}",
     "recentered_note": "Omplacerad på plattan för att passa {printer}s byggvolym.",
-    "help": "Bambu Lab-/MakerWorld-filer (<b>.3mf</b>) bär på mycket slicer-specifikt bagage — Bambu Studio-metadata, mål-/flerfärgsdata, ibland till och med geometri uppdelad i extra filer som din skrivares slicer inte kan läsa — vilket kan göra att en nedladdad modell inte går att öppna. Välj din skrivare ovan och släpp sedan en eller flera filer här (eller en mapp full av dem): appen rensar bort allt utom själva geometrin, kontrollerar den mot din skrivares byggvolym, och varnar för problem som en för stor modell, ovanliga enheter eller hål i ytan. Inget laddas upp — allt sker på din dator."
+    "support_kept_note": "Behåll designerns stödinställningar för den här delen.",
+    "help": "Bambu Lab-/MakerWorld-filer (<b>.3mf</b>) bär på mycket slicer-specifikt bagage — Bambu Studio-metadata, ibland till och med geometri uppdelad i extra filer som din skrivares slicer inte kan läsa — vilket kan göra att en nedladdad modell inte går att öppna. Välj din skrivare ovan och släpp sedan en eller flera filer här (eller en mapp full av dem): appen rensar bort allt utom själva geometrin, kontrollerar den mot din skrivares byggvolym, och varnar för problem som en för stor modell, ovanliga enheter eller hål i ytan. Inget laddas upp — allt sker på din dator."
   },
   "rinkhals": {
     "title": "Rinkhals",

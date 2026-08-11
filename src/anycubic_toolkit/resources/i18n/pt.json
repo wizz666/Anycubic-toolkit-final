@@ -174,7 +174,8 @@
     "open_hint": "Clique duas vezes em uma linha para abri-la no seu fatiador.",
     "failed": "Falha na conversão: {reason}",
     "recentered_note": "Reposicionado na mesa para caber no volume de impressão da {printer}.",
-    "help": "Arquivos <b>.3mf</b> da Bambu Lab / MakerWorld carregam muita bagagem específica do fatiador — metadados do Bambu Studio, dados de pintura/multicor, às vezes até geometria dividida em arquivos extras que o fatiador da sua impressora não consegue ler — o que pode impedir que um modelo baixado seja aberto. Escolha sua impressora acima e solte um ou mais arquivos aqui (ou uma pasta cheia deles): o app remove tudo exceto a geometria real, verifica-a em relação ao volume de impressão da sua impressora e avisa sobre problemas como uma malha grande demais, unidades incomuns ou furos na superfície. Nada é enviado; tudo acontece no seu computador."
+    "support_kept_note": "Mantidas as configurações de suporte do designer para esta peça.",
+    "help": "Arquivos <b>.3mf</b> da Bambu Lab / MakerWorld carregam muita bagagem específica do fatiador — metadados do Bambu Studio, às vezes até geometria dividida em arquivos extras que o fatiador da sua impressora não consegue ler — o que pode impedir que um modelo baixado seja aberto. Escolha sua impressora acima e solte um ou mais arquivos aqui (ou uma pasta cheia deles): o app remove tudo exceto a geometria real, verifica-a em relação ao volume de impressão da sua impressora e avisa sobre problemas como uma malha grande demais, unidades incomuns ou furos na superfície. Nada é enviado; tudo acontece no seu computador."
   },
   "rinkhals": {
     "title": "Rinkhals",

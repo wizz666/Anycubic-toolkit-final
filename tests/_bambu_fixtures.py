@@ -6,6 +6,7 @@ the implementation they're checking.
 
 from __future__ import annotations
 
+import json
 import zipfile
 from pathlib import Path
 
@@ -97,6 +98,24 @@ def bambu_style_model_xml() -> bytes:
 <item objectid="1" transform="1 0 0 0 1 0 0 0 1 0 0 0" BambuStudio:printable="1"/>
 </build>
 </model>""".encode("utf-8")
+
+
+def project_settings_with_global_support(overrides: dict | None = None) -> bytes:
+    """A Metadata/project_settings.config (JSON) with enable_support set
+    only at the project level and listed as a system-default deviation -
+    mirrors a real file (PRMGR_BC-6_V2_216x50.5) where enable_support was
+    never a per-object override at all, only ever a project-wide one."""
+    import json as _json
+
+    data = {
+        "nozzle_diameter": ["0.4"],
+        "enable_support": "1",
+        "support_on_build_plate_only": "1",
+        "different_settings_to_system": ["enable_support;support_on_build_plate_only", "", ""],
+    }
+    if overrides:
+        data.update(overrides)
+    return _json.dumps(data).encode("utf-8")
 
 
 def bambu_style_3mf_bytes_extra_files() -> dict[str, bytes]:
@@ -194,9 +213,27 @@ def split_part_main_model_xml() -> bytes:
 </model>""".encode("utf-8")
 
 
-def split_part_external_model_xml() -> bytes:
+def object_support_model_settings_xml(object_id: str = "1") -> bytes:
+    """A Metadata/model_settings.config with a mix of designer-set
+    support overrides (should be kept) and irrelevant per-object
+    bookkeeping - matrix/name/extruder (should NOT be carried over)."""
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<config>
+  <object id="{object_id}">
+    <metadata key="name" value="thing.stl"/>
+    <metadata key="enable_support" value="1"/>
+    <metadata key="support_type" value="normal(manual)"/>
+    <metadata key="extruder" value="1"/>
+    <part id="1" subtype="normal_part">
+      <metadata key="matrix" value="1 0 0 0 1 0 0 0 1 0 0 0"/>
+    </part>
+  </object>
+</config>""".encode("utf-8")
+
+
+def split_part_external_model_xml(*, paint: bool = True) -> bytes:
     verts_xml = _vertices_xml(CUBE_VERTS)
-    tris_xml = _triangles_xml(CUBE_TRIS)
+    tris_xml = _triangles_xml(CUBE_TRIS, paint_first_two=paint)
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <model xmlns="{CORE_NS}" xmlns:p="{PRODUCTION_NS}" unit="millimeter">
 <resources>
@@ -206,3 +243,79 @@ def split_part_external_model_xml() -> bytes:
 </resources>
 <build/>
 </model>""".encode("utf-8")
+
+
+def _write_json(path: Path, data: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+
+def make_fake_profiles_dir(tmp_path: Path, printer: str = "TestPrinter") -> Path:
+    """A minimal synthetic Anycubic Slicer Next profile bundle - independent
+    of whatever's actually installed on the machine running the tests, so
+    these tests are reproducible on any machine (including CI, which has no
+    Slicer Next install at all). Shared by test_anycubic_profiles.py (unit
+    tests on the module directly) and test_bambu_clean.py (integration,
+    monkeypatching find_profiles_dir to point here)."""
+    root = tmp_path / "profiles"
+    _write_json(
+        root / "machine" / f"Anycubic {printer} 0.4 nozzle.json",
+        {
+            "type": "machine",
+            "from": "system",
+            "name": f"Anycubic {printer} 0.4 nozzle",
+            "inherits": "",
+            "printable_height": "999",
+            "nozzle_diameter": ["0.4"],
+            "bed_temperature": ["60"],
+        },
+    )
+    _write_json(
+        root / "process" / f"0.20mm Standard @Anycubic {printer} 0.4 nozzle.json",
+        {
+            "type": "process",
+            "from": "system",
+            "name": f"0.20mm Standard @Anycubic {printer} 0.4 nozzle",
+            "inherits": "",
+            "enable_support": "0",
+            "support_type": "tree(auto)",
+            "support_style": "default",
+            "layer_height": "0.2",
+        },
+    )
+    _write_json(
+        root / "process" / f"0.28mm Standard @Anycubic {printer} 0.4 nozzle.json",
+        {
+            "type": "process",
+            "from": "system",
+            "name": f"0.28mm Standard @Anycubic {printer} 0.4 nozzle",
+            "inherits": "",
+            "enable_support": "0",
+            "support_type": "tree(auto)",
+            "support_style": "default",
+            "layer_height": "0.28",
+        },
+    )
+    _write_json(
+        root / "filament" / "fdm_filament_common.json",
+        {
+            "type": "filament",
+            "from": "system",
+            "name": "fdm_filament_common",
+            "inherits": "",
+            "filament_density": ["1.24"],
+            "filament_diameter": ["1.75"],
+        },
+    )
+    _write_json(
+        root / "filament" / f"Anycubic PLA @Anycubic {printer} 0.4 nozzle.json",
+        {
+            "type": "filament",
+            "from": "system",
+            "name": f"Anycubic PLA @Anycubic {printer} 0.4 nozzle",
+            "inherits": "fdm_filament_common",
+            "filament_type": ["PLA"],
+            "nozzle_temperature": ["205"],
+        },
+    )
+    return root

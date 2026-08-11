@@ -174,7 +174,8 @@
     "open_hint": "Doppelklicke auf eine Zeile, um sie in deinem Slicer zu öffnen.",
     "failed": "Konvertierung fehlgeschlagen: {reason}",
     "recentered_note": "Auf der Druckplatte neu positioniert, um in das Bauvolumen der {printer} zu passen.",
-    "help": "Bambu Lab-/MakerWorld-Dateien (<b>.3mf</b>) enthalten viel Slicer-spezifischen Ballast — Bambu-Studio-Metadaten, Lackier-/Mehrfarbdaten, manchmal sogar auf Zusatzdateien aufgeteilte Geometrie, die der Slicer deines Druckers nicht lesen kann — wodurch ein heruntergeladenes Modell sich nicht öffnen lässt. Wähle oben deinen Drucker und ziehe dann eine oder mehrere Dateien hierher (oder einen ganzen Ordner davon): Die App entfernt alles außer der eigentlichen Geometrie, prüft sie gegen das Bauvolumen deines Druckers und warnt vor Problemen wie einem zu großen Mesh, ungewöhnlichen Einheiten oder Löchern in der Oberfläche. Es wird nichts hochgeladen — alles geschieht auf deinem Computer."
+    "support_kept_note": "Die Stützeinstellungen des Designers für dieses Teil wurden beibehalten.",
+    "help": "Bambu Lab-/MakerWorld-Dateien (<b>.3mf</b>) enthalten viel Slicer-spezifischen Ballast — Bambu-Studio-Metadaten, manchmal sogar auf Zusatzdateien aufgeteilte Geometrie, die der Slicer deines Druckers nicht lesen kann — wodurch ein heruntergeladenes Modell sich nicht öffnen lässt. Wähle oben deinen Drucker und ziehe dann eine oder mehrere Dateien hierher (oder einen ganzen Ordner davon): Die App entfernt alles außer der eigentlichen Geometrie, prüft sie gegen das Bauvolumen deines Druckers und warnt vor Problemen wie einem zu großen Mesh, ungewöhnlichen Einheiten oder Löchern in der Oberfläche. Es wird nichts hochgeladen — alles geschieht auf deinem Computer."
   },
   "rinkhals": {
     "title": "Rinkhals",

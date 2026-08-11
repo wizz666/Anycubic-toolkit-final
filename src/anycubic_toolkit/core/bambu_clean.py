@@ -29,6 +29,7 @@ external reference, so those components are inlined back into a plain
 from __future__ import annotations
 
 import copy
+import json
 import re
 import shutil
 import zipfile
@@ -40,6 +41,8 @@ import numpy as np
 import trimesh
 from lxml import etree
 
+from anycubic_toolkit.core import anycubic_profiles
+
 # Known Anycubic printer build volumes (mm), keyed by display name. Sourced
 # from store.anycubic.com per-model specs.
 PRINTER_PROFILES: dict[str, tuple[float, float, float]] = {
@@ -47,6 +50,13 @@ PRINTER_PROFILES: dict[str, tuple[float, float, float]] = {
     "Kobra S1": (250.0, 250.0, 250.0),
     "Kobra S1 Max": (350.0, 350.0, 350.0),
 }
+
+
+def _printer_name_for_bed_size(bed_size: tuple[float, float, float]) -> Optional[str]:
+    for name, size in PRINTER_PROFILES.items():
+        if size == bed_size:
+            return name
+    return None
 
 # Default/legacy build volume (Kobra X) - kept as a plain constant since
 # process_file/process_batch/clean_3mf all default to it.
@@ -56,13 +66,64 @@ CORE_NS = "http://schemas.microsoft.com/3dmanufacturing/core/2015/02"
 _RELS_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
 _MODEL_REL_TYPE = "http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"
 
-# Attributes we keep; everything else on these elements is slicer/paint/material
-# specific (paint_color, mmu_segmentation, pid/p1 material refs, production
-# extension UUIDs/paths, ...) and gets dropped.
-_TRIANGLE_KEEP_ATTRS = {"v1", "v2", "v3"}
+# Attributes we keep; everything else on these elements is slicer-only
+# bookkeeping (pid/p1 material refs, production extension UUIDs/paths, ...)
+# and gets dropped. paint_color/mmu_segmentation are deliberately kept: they
+# encode per-triangle multi-color painting (e.g. Bambu Studio's "Color
+# Painting" tool), which Anycubic Slicer Next reads natively since it's an
+# OrcaSlicer fork sharing the same 3MF paint format - stripping them threw
+# away a user's multi-color design for no compatibility reason.
+_TRIANGLE_KEEP_ATTRS = {"v1", "v2", "v3", "paint_color", "mmu_segmentation"}
 _OBJECT_KEEP_ATTRS = {"id", "type", "name"}
 _VERTEX_KEEP_ATTRS = {"x", "y", "z"}
 _ITEM_KEEP_ATTRS = {"objectid", "transform", "partnumber", "printable"}
+
+# Per-object support settings worth carrying over from a designer's own
+# Metadata/model_settings.config. A designer who deliberately marked a part
+# as needing support (e.g. an overhanging lattice/frame) knows that better
+# than a generic default - silently dropping it (as the rest of Bambu's
+# per-object/project settings are, for printer-neutrality) just means
+# Slicer Next opens the file with supports off and surfaces a confusing
+# "floating regions" warning the designer had already solved.
+_OBJECT_SUPPORT_KEYS = {
+    "enable_support",
+    "support_type",
+    "support_style",
+    "support_on_build_plate_only",
+    "support_threshold_angle",
+    "support_base_pattern",
+    "support_interface_pattern",
+    "support_top_z_distance",
+    "support_bottom_z_distance",
+    "tree_support_branch_diameter",
+    "tree_support_branch_angle",
+}
+
+
+def _normalize_support_settings(settings: dict[str, str]) -> dict[str, str]:
+    """Coerce a "(manual)" support_type (``tree(manual)``, ``normal
+    (manual)``) to its "(auto)" equivalent.
+
+    "(manual)" means "only where the designer manually placed support
+    points in Bambu Studio's interactive support editor" - a separate
+    proprietary point list this pipeline has no way to read or carry over
+    (it is not per-triangle paint data). Carrying the value over as-is
+    produces a file with support nominally enabled but zero actual support
+    material generated at slice time. Confirmed against a real file: the
+    reconstructed override showed correctly as Enable Support = on, Type =
+    Tree(manual) in Slicer Next's Objects tab, yet the sliced preview had no
+    Support/Support interface material at all - switching Type to
+    Tree(auto) by hand was the only change needed to make ~2h58m/22g of
+    tree supports actually appear. Auto-detecting overhangs with the same
+    style/pattern/angle settings is a far better approximation of the
+    designer's intent than silently generating nothing.
+    """
+    support_type = settings.get("support_type")
+    if support_type and "(manual)" in support_type:
+        settings = dict(settings)
+        settings["support_type"] = support_type.replace("(manual)", "(auto)")
+    return settings
+
 
 _CONTENT_TYPES_XML = (
     b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
@@ -71,6 +132,7 @@ _CONTENT_TYPES_XML = (
     b'"application/vnd.openxmlformats-package.relationships+xml"/>'
     b'<Default Extension="model" ContentType='
     b'"application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/>'
+    b'<Default Extension="config" ContentType="application/xml"/>'
     b"</Types>\n"
 )
 
@@ -111,6 +173,8 @@ class CleanResult:
     dropped_files: list[str] = field(default_factory=list)
     inlined_components: int = 0
     recentered: bool = False
+    support_settings_kept: bool = False
+    project_profile_reconstructed: bool = False
     notes: list[str] = field(default_factory=list)
 
 
@@ -193,6 +257,14 @@ def _clean_3mf_structured(
             raise ThreeMFError("Main part is not a <model> root element")
 
         inlined = _inline_components(zf, model_root)
+        object_support_settings = _read_object_support_settings(zf)
+        global_support_settings = _read_global_support_settings(zf)
+        project_profile_context = None
+        if object_support_settings or global_support_settings:
+            # Only worth preparing when there's an actual support override
+            # to carry - otherwise this would add an unnecessary settings
+            # file to every conversion, needed or not.
+            project_profile_context = _prepare_project_profile_context(zf, bed_size)
         original_extra_files = [
             name
             for name in zf.namelist()
@@ -200,7 +272,16 @@ def _clean_3mf_structured(
             and not name.endswith("/")
         ]
 
-    return _finish_clean(model_root, output_path, bed_size, inlined, original_extra_files)
+    return _finish_clean(
+        model_root,
+        output_path,
+        bed_size,
+        inlined,
+        original_extra_files,
+        object_support_settings,
+        global_support_settings,
+        project_profile_context,
+    )
 
 
 def _finish_clean(
@@ -209,6 +290,9 @@ def _finish_clean(
     bed_size: tuple[float, float, float],
     inlined: int,
     original_extra_files: list[str],
+    object_support_settings: dict[str, dict[str, str]] | None = None,
+    global_support_settings: dict[str, str] | None = None,
+    project_profile_context: "anycubic_profiles.ProfileContext | None" = None,
 ) -> CleanResult:
     """Strip/recenter an already-inlined (and, for multi-plate splits,
     already-filtered-to-one-plate) model tree and write it out."""
@@ -218,12 +302,41 @@ def _finish_clean(
 
     recentered = _recenter_build_items(model_root, bed_size)
 
-    objects_found = len(model_root.findall(f".//{{{CORE_NS}}}object"))
+    top_objects = model_root.findall(f".//{{{CORE_NS}}}object")
+    objects_found = len(top_objects)
+
+    # Project-level support settings (e.g. enable_support is very often only
+    # ever set there, never per-object) apply to every object on this plate
+    # as a baseline; an object's own explicit override always wins.
+    retained_ids = {obj.get("id") for obj in top_objects}
+    kept_support_settings: dict[str, dict[str, str]] = {}
+    for obj_id in retained_ids:
+        merged = dict(global_support_settings or {})
+        merged.update((object_support_settings or {}).get(obj_id, {}))
+        if merged:
+            kept_support_settings[obj_id] = merged
+
+    project_settings = None
+    if project_profile_context is not None and kept_support_settings:
+        # This plate's own retained geometry decides how many filament
+        # slots the reconstructed project needs to declare - a plate with
+        # no paint data at all only needs 1, a painted one needs as many as
+        # its distinct paint values reference (see
+        # _plate_filament_slot_count).
+        filament_slots = _plate_filament_slot_count(model_root)
+        project_settings = anycubic_profiles.build_project_settings(
+            project_profile_context.profiles_dir,
+            project_profile_context.printer_name,
+            project_profile_context.filament_type,
+            project_profile_context.layer_height,
+            global_support_settings or {},
+            filament_slots=filament_slots,
+        )
 
     model_xml = etree.tostring(
         model_root, xml_declaration=True, encoding="UTF-8", standalone=True
     )
-    _write_minimal_3mf(output_path, model_xml)
+    _write_minimal_3mf(output_path, model_xml, kept_support_settings, project_settings)
 
     return CleanResult(
         output_path=output_path,
@@ -233,6 +346,8 @@ def _finish_clean(
         dropped_files=original_extra_files,
         inlined_components=inlined,
         recentered=recentered,
+        support_settings_kept=bool(kept_support_settings),
+        project_profile_reconstructed=project_settings is not None,
     )
 
 
@@ -283,12 +398,28 @@ def _clean_3mf_plates_structured(
             if name not in (model_part, "[Content_Types].xml", "_rels/.rels")
             and not name.endswith("/")
         ]
+        object_support_settings = _read_object_support_settings(zf)
+        global_support_settings = _read_global_support_settings(zf)
+        project_profile_context = None
+        if object_support_settings or global_support_settings:
+            project_profile_context = _prepare_project_profile_context(zf, bed_size)
         plates = _detect_plates(zf)
 
         if not plates:
             inlined = _inline_components(zf, base_root)
             out = output_dir / f"{stem}_clean.3mf"
-            return [_finish_clean(base_root, out, bed_size, inlined, original_extra_files)]
+            return [
+                _finish_clean(
+                    base_root,
+                    out,
+                    bed_size,
+                    inlined,
+                    original_extra_files,
+                    object_support_settings,
+                    global_support_settings,
+                    project_profile_context,
+                )
+            ]
 
         # Filter each plate's copy down to its own object(s) *before*
         # inlining, so each report's inlined-component count reflects only
@@ -305,7 +436,16 @@ def _clean_3mf_plates_structured(
             used_names.add(suffix)
             out = output_dir / f"{stem}_{suffix}_clean.3mf"
             results.append(
-                _finish_clean(plate_root, out, bed_size, inlined, original_extra_files)
+                _finish_clean(
+                    plate_root,
+                    out,
+                    bed_size,
+                    inlined,
+                    original_extra_files,
+                    object_support_settings,
+                    global_support_settings,
+                    project_profile_context,
+                )
             )
         return results
 
@@ -339,6 +479,145 @@ def _detect_plates(zf: zipfile.ZipFile) -> list[PlateInfo] | None:
             plates.append(PlateInfo(name=name, object_ids=object_ids))
 
     return plates if len(plates) > 1 else None
+
+
+def _read_object_support_settings(zf: zipfile.ZipFile) -> dict[str, dict[str, str]]:
+    """Read Bambu Studio's own per-object overrides from ``Metadata/
+    model_settings.config`` (if present) and return, keyed by object id,
+    only the support-related ones (:data:`_OBJECT_SUPPORT_KEYS`). Everything
+    else in that file (matrices, source offsets, mesh stats, ...) is
+    slicer-internal bookkeeping already reconstructed by the geometry clean
+    itself and isn't carried over."""
+    try:
+        raw = zf.read("Metadata/model_settings.config")
+    except KeyError:
+        return {}
+    try:
+        root = etree.fromstring(raw)
+    except etree.XMLSyntaxError:
+        return {}
+
+    result: dict[str, dict[str, str]] = {}
+    for obj_el in root.findall("object"):
+        obj_id = obj_el.get("id")
+        if obj_id is None:
+            continue
+        settings = {
+            md.get("key"): md.get("value")
+            for md in obj_el.findall("metadata")
+            if md.get("key") in _OBJECT_SUPPORT_KEYS and md.get("value") is not None
+        }
+        if settings:
+            result[obj_id] = _normalize_support_settings(settings)
+    return result
+
+
+def _read_global_support_settings(zf: zipfile.ZipFile) -> dict[str, str]:
+    """Read Bambu Studio's project-level profile (``Metadata/
+    project_settings.config``, a JSON file) and return whichever of
+    :data:`_OBJECT_SUPPORT_KEYS` the designer explicitly customized away
+    from their own system default, per that file's own
+    ``different_settings_to_system`` bookkeeping (the same "only override
+    what was actually customized" signal the manual MakerWorld->Kobra S1
+    conversion workflow already relies on).
+
+    ``enable_support`` in particular is very often only ever set at this
+    project level, never as a per-object override - a real file confirmed
+    this: an object's own metadata block had support_type/style/pattern
+    overrides but no enable_support key at all, while project_settings.
+    config had enable_support=1 listed as a system-default deviation. Object
+    -level overrides always win over this project-level fallback (merged in
+    by the caller)."""
+    data = _read_source_project_settings(zf)
+    if data is None:
+        return {}
+
+    customized: set[str] = set()
+    for group in data.get("different_settings_to_system", []):
+        if isinstance(group, str):
+            customized.update(k for k in group.split(";") if k)
+
+    settings = {
+        key: str(data[key])
+        for key in _OBJECT_SUPPORT_KEYS
+        if key in customized and key in data
+    }
+    return _normalize_support_settings(settings)
+
+
+def _read_source_project_settings(zf: zipfile.ZipFile) -> Optional[dict]:
+    """Parse ``Metadata/project_settings.config`` (Bambu's project-level
+    JSON profile) if present, or None."""
+    try:
+        raw = zf.read("Metadata/project_settings.config")
+    except KeyError:
+        return None
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _read_source_material_hints(zf: zipfile.ZipFile) -> tuple[str, float]:
+    """Best-effort (filament_type, layer_height) from the source file's own
+    project settings, with safe defaults when absent or malformed - used to
+    pick which Anycubic system profile to reconstruct from, not treated as
+    load-bearing."""
+    data = _read_source_project_settings(zf) or {}
+    filament_type = "PLA"
+    raw_type = data.get("filament_type")
+    if isinstance(raw_type, list) and raw_type and isinstance(raw_type[0], str):
+        filament_type = raw_type[0]
+    layer_height = 0.2
+    try:
+        layer_height = float(data.get("layer_height", 0.2))
+    except (TypeError, ValueError):
+        pass
+    return filament_type, layer_height
+
+
+def _prepare_project_profile_context(
+    zf: zipfile.ZipFile, bed_size: tuple[float, float, float]
+) -> Optional[anycubic_profiles.ProfileContext]:
+    """Best-effort setup for Anycubic-native project_settings.config
+    reconstruction (see :mod:`anycubic_toolkit.core.anycubic_profiles`) for
+    the selected printer. Returns None (skip project-level reconstruction
+    entirely) if Slicer Next's system profiles aren't found on this
+    machine, or don't cover this printer - the per-object
+    model_settings.config still gets written on its own either way.
+
+    Deliberately doesn't build the final settings dict yet: how many
+    filament slots to declare depends on a specific plate's own retained
+    geometry (see :func:`_plate_filament_slot_count`), not known until
+    after that plate has been inlined/filtered in :func:`_finish_clean`."""
+    printer_name = _printer_name_for_bed_size(bed_size)
+    if printer_name is None:
+        return None
+    profiles_dir = anycubic_profiles.find_profiles_dir()
+    if profiles_dir is None:
+        return None
+    filament_type, layer_height = _read_source_material_hints(zf)
+    return anycubic_profiles.ProfileContext(profiles_dir, printer_name, filament_type, layer_height)
+
+
+def _plate_filament_slot_count(model_root) -> int:
+    """How many filament/extruder slots this plate's paint data needs.
+
+    A real multi-color Bambu project declares one array entry per filament
+    slot across ~170 settings keys; declaring only 1 slot for a plate whose
+    mesh has per-triangle paint_color/mmu_segmentation data referencing a
+    second extruder made Slicer Next treat the reconstructed project as
+    genuinely single-filament and silently drop the painted color, once it
+    started trusting the file at all. Each distinct paint value found is
+    assumed to reference a distinct extruder, plus one more for the
+    unpainted base (extruder 1); returns 1 for a plate with no paint data."""
+    distinct: set[str] = set()
+    for tri in model_root.iter(f"{{{CORE_NS}}}triangle"):
+        value = tri.get("paint_color") or tri.get("mmu_segmentation")
+        if value:
+            distinct.add(value)
+    return len(distinct) + 1 if distinct else 1
 
 
 def _filter_to_plate(model_root, object_ids: set[str]) -> None:
@@ -436,18 +715,31 @@ def _parse_transform(transform: str) -> np.ndarray:
     )
 
 
-def _read_mesh_arrays(mesh_el) -> tuple[np.ndarray, np.ndarray]:
+def _read_mesh_arrays(
+    mesh_el,
+) -> tuple[np.ndarray, np.ndarray, list[dict[str, str]]]:
+    """Returns (vertices, triangles, per-triangle extra attrs) - the extra
+    dict for each triangle holds any kept attribute besides v1/v2/v3 (e.g.
+    paint_color), so callers that reassemble triangles (inlining a
+    production-extension component) don't silently drop it."""
     vertices_el = mesh_el.find(f"{{{CORE_NS}}}vertices")
     triangles_el = mesh_el.find(f"{{{CORE_NS}}}triangles")
     verts = [
         (float(v.get("x")), float(v.get("y")), float(v.get("z")))
         for v in (vertices_el if vertices_el is not None else [])
     ]
-    tris = [
-        (int(t.get("v1")), int(t.get("v2")), int(t.get("v3")))
-        for t in (triangles_el if triangles_el is not None else [])
-    ]
-    return np.array(verts, dtype=float), np.array(tris, dtype=int)
+    tris = []
+    tri_extra: list[dict[str, str]] = []
+    for t in triangles_el if triangles_el is not None else []:
+        tris.append((int(t.get("v1")), int(t.get("v2")), int(t.get("v3"))))
+        tri_extra.append(
+            {
+                k: v
+                for k, v in t.attrib.items()
+                if k in _TRIANGLE_KEEP_ATTRS and k not in ("v1", "v2", "v3")
+            }
+        )
+    return np.array(verts, dtype=float), np.array(tris, dtype=int), tri_extra
 
 
 def _fmt(v: float) -> str:
@@ -468,7 +760,11 @@ def _fmt(v: float) -> str:
     return repr(float(v))
 
 
-def _make_mesh_element(verts: np.ndarray, tris: np.ndarray):
+def _make_mesh_element(
+    verts: np.ndarray,
+    tris: np.ndarray,
+    tri_extra: list[dict[str, str]] | None = None,
+):
     mesh_el = etree.Element(f"{{{CORE_NS}}}mesh")
     vertices_el = etree.SubElement(mesh_el, f"{{{CORE_NS}}}vertices")
     for x, y, z in verts:
@@ -476,13 +772,15 @@ def _make_mesh_element(verts: np.ndarray, tris: np.ndarray):
             vertices_el, f"{{{CORE_NS}}}vertex", x=_fmt(x), y=_fmt(y), z=_fmt(z)
         )
     triangles_el = etree.SubElement(mesh_el, f"{{{CORE_NS}}}triangles")
-    for a, b, c in tris:
+    for i, (a, b, c) in enumerate(tris):
+        extra = tri_extra[i] if tri_extra is not None else {}
         etree.SubElement(
             triangles_el,
             f"{{{CORE_NS}}}triangle",
             v1=str(int(a)),
             v2=str(int(b)),
             v3=str(int(c)),
+            **extra,
         )
     return mesh_el
 
@@ -516,6 +814,7 @@ def _inline_components(zf: zipfile.ZipFile, model_root) -> int:
 
         all_verts: list[np.ndarray] = []
         all_tris: list[np.ndarray] = []
+        all_tri_extra: list[dict[str, str]] = []
         vert_offset = 0
         for comp in comps:
             objectid = comp.get("objectid")
@@ -537,7 +836,7 @@ def _inline_components(zf: zipfile.ZipFile, model_root) -> int:
             if mesh_el is None:
                 continue
 
-            verts, tris = _read_mesh_arrays(mesh_el)
+            verts, tris, tri_extra = _read_mesh_arrays(mesh_el)
             if len(verts) == 0:
                 continue
             if transform:
@@ -545,13 +844,14 @@ def _inline_components(zf: zipfile.ZipFile, model_root) -> int:
                 verts = (m[:3, :3] @ verts.T).T + m[:3, 3]
             all_verts.append(verts)
             all_tris.append(tris + vert_offset)
+            all_tri_extra.extend(tri_extra)
             vert_offset += len(verts)
 
         if not all_verts:
             continue
         merged_verts = np.concatenate(all_verts, axis=0)
         merged_tris = np.concatenate(all_tris, axis=0)
-        new_mesh_el = _make_mesh_element(merged_verts, merged_tris)
+        new_mesh_el = _make_mesh_element(merged_verts, merged_tris, all_tri_extra)
         obj.replace(components_el, new_mesh_el)
         inlined += 1
 
@@ -636,7 +936,7 @@ def _strip_extension_content(model_root) -> int:
 
 def _local_bbox(mesh_el) -> tuple[np.ndarray, np.ndarray] | None:
     """Local-space (min, max) corners of a mesh's vertices, or None if empty."""
-    verts, _ = _read_mesh_arrays(mesh_el)
+    verts, _, _ = _read_mesh_arrays(mesh_el)
     if len(verts) == 0:
         return None
     return verts.min(axis=0), verts.max(axis=0)
@@ -727,12 +1027,41 @@ def _recenter_build_items(model_root, bed_size: tuple[float, float, float]) -> b
     return True
 
 
-def _write_minimal_3mf(output_path: Path, model_xml_bytes: bytes) -> None:
+def _make_model_settings_xml(object_support_settings: dict[str, dict[str, str]]) -> bytes:
+    """Build a minimal ``Metadata/model_settings.config`` carrying only the
+    per-object support overrides Slicer Next reads from that fixed path
+    (Bambu/OrcaSlicer convention, not part of core 3MF - no relationship or
+    declared content type is required for it, matching real Bambu Studio
+    output, but we declare one anyway since we control both ends here)."""
+    config_el = etree.Element("config")
+    for obj_id, settings in object_support_settings.items():
+        obj_el = etree.SubElement(config_el, "object", id=obj_id)
+        for key, value in settings.items():
+            etree.SubElement(obj_el, "metadata", key=key, value=value)
+    return etree.tostring(config_el, xml_declaration=True, encoding="UTF-8", standalone=True)
+
+
+def _write_minimal_3mf(
+    output_path: Path,
+    model_xml_bytes: bytes,
+    object_support_settings: dict[str, dict[str, str]] | None = None,
+    project_settings: dict | None = None,
+) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(output_path, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("[Content_Types].xml", _CONTENT_TYPES_XML)
         zf.writestr("_rels/.rels", _RELS_XML)
         zf.writestr("3D/3dmodel.model", model_xml_bytes)
+        if object_support_settings:
+            zf.writestr(
+                "Metadata/model_settings.config",
+                _make_model_settings_xml(object_support_settings),
+            )
+        if project_settings:
+            zf.writestr(
+                "Metadata/project_settings.config",
+                json.dumps(project_settings, indent=1).encode("utf-8"),
+            )
 
 
 # ------------------------------------------------------------------ validation

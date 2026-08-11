@@ -300,6 +300,8 @@ class BambuImportPage(ModulePage):
                 notes.append(
                     self.tr_("bambu.recentered_note", printer=self.printer_combo.currentText())
                 )
+            if report.clean and report.clean.support_settings_kept:
+                notes.append(self.tr_("bambu.support_kept_note"))
             glyph = _STATUS_GLYPH.get(report.status, "")
             # A multi-plate input produces several reports sharing one
             # input_path - show the (distinct, plate-named) output file

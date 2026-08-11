@@ -174,7 +174,8 @@
     "open_hint": "Double-click a row to open it in your slicer.",
     "failed": "Conversion failed: {reason}",
     "recentered_note": "Repositioned on the plate to fit the {printer}'s build volume.",
-    "help": "Bambu Lab / MakerWorld <b>.3mf</b> files carry a lot of slicer-specific baggage — Bambu Studio metadata, paint/multi-color data, sometimes even geometry split across extra files your printer's slicer can't read — that can make a downloaded model fail to open. Pick your printer above, then drop one or more files here (or a folder full of them): the app strips everything except the actual geometry, checks it against your printer's build volume, and warns you about problems like a mesh that's too big, unusual units, or holes in the surface. Nothing is uploaded; it all happens on your computer."
+    "support_kept_note": "Kept the designer's support settings for this part.",
+    "help": "Bambu Lab / MakerWorld <b>.3mf</b> files carry a lot of slicer-specific baggage — Bambu Studio metadata, sometimes even geometry split across extra files your printer's slicer can't read — that can make a downloaded model fail to open. Pick your printer above, then drop one or more files here (or a folder full of them): the app strips everything except the actual geometry, checks it against your printer's build volume, and warns you about problems like a mesh that's too big, unusual units, or holes in the surface. Nothing is uploaded; it all happens on your computer."
   },
   "rinkhals": {
     "title": "Rinkhals",

@@ -1,15 +1,19 @@
 from __future__ import annotations
 
+import json
 import zipfile
 from pathlib import Path
 
 import pytest
 import trimesh
 
+from anycubic_toolkit.core import bambu_clean as bc
 from anycubic_toolkit.core.bambu_clean import (
     BED_SIZE_MM,
+    PRINTER_PROFILES,
     ThreeMFError,
     _fmt,
+    _normalize_support_settings,
     clean_3mf,
     clean_3mf_all,
     process_batch,
@@ -22,7 +26,10 @@ from _bambu_fixtures import (
     MULTI_PLATE_MODEL_SETTINGS,
     bambu_style_3mf_bytes_extra_files,
     bambu_style_model_xml,
+    make_fake_profiles_dir,
     multi_plate_model_xml,
+    object_support_model_settings_xml,
+    project_settings_with_global_support,
     split_part_external_model_xml,
     split_part_main_model_xml,
     two_object_model_xml,
@@ -49,7 +56,11 @@ def test_clean_strips_bambu_content_and_loads_in_trimesh(tmp_path: Path):
         }
         model_xml = zf.read("3D/3dmodel.model")
 
-    for needle in (b"paint_color", b"mmu_segmentation", b"BambuStudio", b"Bambu Lab"):
+    # paint_color/mmu_segmentation are multi-color painting data and are kept
+    # (Slicer Next reads them natively); Bambu's own slicer bookkeeping is not.
+    assert b'paint_color="4"' in model_xml
+    assert b'mmu_segmentation="4:0"' in model_xml
+    for needle in (b"BambuStudio", b"Bambu Lab"):
         assert needle not in model_xml, f"{needle!r} should have been stripped"
 
     scene = trimesh.load(out, force="scene")
@@ -72,9 +83,128 @@ def test_clean_inlines_production_extension_component(tmp_path: Path):
     assert result.inlined_components == 1
     with zipfile.ZipFile(out) as zf:
         assert "3D/Objects/object_2.model" not in zf.namelist()
+        model_xml = zf.read("3D/3dmodel.model")
+    # paint_color on the external part's triangles must survive inlining,
+    # not just a same-file strip - this is the real-world path (Bambu Studio
+    # splits geometry into a separate part file) that originally lost it.
+    assert b'paint_color="4"' in model_xml
+    assert b'mmu_segmentation="4:0"' in model_xml
     mesh = trimesh.load(out, force="mesh")
     assert len(mesh.faces) == 12
     assert mesh.is_watertight
+
+
+def test_clean_keeps_object_support_settings(tmp_path: Path):
+    src = tmp_path / "split_part.3mf"
+    write_3mf(
+        src,
+        split_part_main_model_xml(),
+        {
+            "3D/Objects/object_2.model": split_part_external_model_xml(),
+            "Metadata/model_settings.config": object_support_model_settings_xml("1"),
+        },
+    )
+
+    out = tmp_path / "split_part_clean.3mf"
+    result = clean_3mf(src, out)
+
+    assert result.support_settings_kept
+    with zipfile.ZipFile(out) as zf:
+        assert "Metadata/model_settings.config" in zf.namelist()
+        settings_xml = zf.read("Metadata/model_settings.config")
+
+    assert b'<object id="1">' in settings_xml
+    assert b'key="enable_support" value="1"' in settings_xml
+    # support_type is normalized from "(manual)" to "(auto)" - "manual"
+    # support relies on designer-placed support points this pipeline can't
+    # read/carry over, so keeping it verbatim would produce a file with
+    # support nominally enabled but nothing actually generated at slice time.
+    assert b'key="support_type" value="normal(auto)"' in settings_xml
+    assert b"normal(manual)" not in settings_xml
+    # Non-support bookkeeping (matrix/name/extruder) is not carried over -
+    # only the specific support-related keys are.
+    for needle in (b"matrix", b'key="extruder"', b'key="name"'):
+        assert needle not in settings_xml
+
+    # The output still loads and slices fine with the extra metadata part.
+    mesh = trimesh.load(out, force="mesh")
+    assert len(mesh.faces) == 12
+    assert mesh.is_watertight
+
+
+def test_clean_falls_back_to_project_level_enable_support(tmp_path: Path):
+    """Real-world bug: enable_support is sometimes only ever set at the
+    project level (project_settings.config), never as a per-object override
+    - an object whose own metadata has support_type/style but no
+    enable_support key must still get enable_support from the project
+    default, or Slicer Next opens the file with supports silently off."""
+    src = tmp_path / "split_part.3mf"
+    write_3mf(
+        src,
+        split_part_main_model_xml(),
+        {
+            "3D/Objects/object_2.model": split_part_external_model_xml(),
+            "Metadata/project_settings.config": project_settings_with_global_support(),
+        },
+    )
+
+    out = tmp_path / "split_part_clean.3mf"
+    result = clean_3mf(src, out)
+
+    assert result.support_settings_kept
+    with zipfile.ZipFile(out) as zf:
+        settings_xml = zf.read("Metadata/model_settings.config")
+
+    assert b'<object id="1">' in settings_xml
+    assert b'key="enable_support" value="1"' in settings_xml
+    assert b'key="support_on_build_plate_only" value="1"' in settings_xml
+
+
+def test_clean_object_level_support_wins_over_project_level(tmp_path: Path):
+    """When both levels set the same key, the object's own override wins -
+    matching Bambu Studio's own precedence."""
+    src = tmp_path / "split_part.3mf"
+    write_3mf(
+        src,
+        split_part_main_model_xml(),
+        {
+            "3D/Objects/object_2.model": split_part_external_model_xml(),
+            "Metadata/model_settings.config": object_support_model_settings_xml("1"),
+            "Metadata/project_settings.config": project_settings_with_global_support(
+                {"support_type": "tree(auto)"}
+            ),
+        },
+    )
+
+    out = tmp_path / "split_part_clean.3mf"
+    result = clean_3mf(src, out)
+
+    assert result.support_settings_kept
+    with zipfile.ZipFile(out) as zf:
+        settings_xml = zf.read("Metadata/model_settings.config").decode("utf-8")
+
+    # The object's own override (normal(manual) -> normalized to
+    # normal(auto), from object_support_model_settings_xml) wins over the
+    # project default (tree(auto)); the project-only key
+    # (support_on_build_plate_only) still fills the gap since the object
+    # doesn't set it.
+    assert 'key="support_type" value="normal(auto)"' in settings_xml
+    assert "tree(auto)" not in settings_xml
+    assert 'key="support_on_build_plate_only" value="1"' in settings_xml
+
+
+def test_clean_without_support_settings_omits_model_settings_file(tmp_path: Path):
+    """A file with no per-object support overrides shouldn't get an empty/
+    unnecessary Metadata/model_settings.config in the output."""
+    src = tmp_path / "bambu_thing.3mf"
+    write_3mf(src, bambu_style_model_xml(), bambu_style_3mf_bytes_extra_files())
+
+    out = tmp_path / "bambu_thing_clean.3mf"
+    result = clean_3mf(src, out)
+
+    assert not result.support_settings_kept
+    with zipfile.ZipFile(out) as zf:
+        assert "Metadata/model_settings.config" not in zf.namelist()
 
 
 def test_clean_raises_on_totally_unreadable_file(tmp_path: Path):
@@ -234,3 +364,162 @@ def test_fmt_preserves_full_float_precision():
     # exactly so this can never happen again.
     tricky = 128.00000005
     assert float(_fmt(tricky)) == tricky
+
+
+def test_clean_reconstructs_project_settings_when_profiles_available(
+    tmp_path: Path, monkeypatch
+):
+    """When Anycubic Slicer Next's own system profiles are found, and there
+    are support overrides worth carrying, a full project-level
+    Metadata/project_settings.config is reconstructed from them (machine +
+    process + filament, real-world-verified to be what Slicer Next actually
+    needs alongside model_settings.config for per-object overrides to take
+    effect - shipping model_settings.config alone was silently ignored)."""
+    profiles_root = make_fake_profiles_dir(tmp_path, printer="Kobra X")
+    monkeypatch.setattr(
+        bc.anycubic_profiles, "find_profiles_dir", lambda override=None: profiles_root
+    )
+
+    src = tmp_path / "split_part.3mf"
+    write_3mf(
+        src,
+        split_part_main_model_xml(),
+        {
+            "3D/Objects/object_2.model": split_part_external_model_xml(),
+            "Metadata/project_settings.config": project_settings_with_global_support(),
+        },
+    )
+    out = tmp_path / "split_part_clean.3mf"
+    result = clean_3mf(src, out, bed_size=PRINTER_PROFILES["Kobra X"])
+
+    assert result.project_profile_reconstructed
+    with zipfile.ZipFile(out) as zf:
+        assert "Metadata/project_settings.config" in zf.namelist()
+        project_settings = json.loads(zf.read("Metadata/project_settings.config"))
+
+    assert project_settings["enable_support"] == "1"
+    assert project_settings["support_on_build_plate_only"] == "1"
+    assert project_settings["printer_settings_id"] == "Anycubic Kobra X 0.4 nozzle"
+    assert "from" not in project_settings
+
+
+def test_clean_skips_project_settings_when_profiles_unavailable(tmp_path: Path, monkeypatch):
+    """Slicer Next not being installed (or not bundling this printer) must
+    degrade gracefully - the per-object model_settings.config still gets
+    written on its own, matching this feature's pre-existing behavior."""
+    monkeypatch.setattr(bc.anycubic_profiles, "find_profiles_dir", lambda override=None: None)
+
+    src = tmp_path / "split_part.3mf"
+    write_3mf(
+        src,
+        split_part_main_model_xml(),
+        {
+            "3D/Objects/object_2.model": split_part_external_model_xml(),
+            "Metadata/project_settings.config": project_settings_with_global_support(),
+        },
+    )
+    out = tmp_path / "split_part_clean.3mf"
+    result = clean_3mf(src, out)
+
+    assert not result.project_profile_reconstructed
+    assert result.support_settings_kept
+    with zipfile.ZipFile(out) as zf:
+        names = zf.namelist()
+    assert "Metadata/project_settings.config" not in names
+    assert "Metadata/model_settings.config" in names
+
+
+@pytest.mark.parametrize(
+    ("input_type", "expected_type"),
+    [
+        ("tree(manual)", "tree(auto)"),
+        ("normal(manual)", "normal(auto)"),
+        ("tree(auto)", "tree(auto)"),
+        ("normal(auto)", "normal(auto)"),
+    ],
+)
+def test_normalize_support_settings_coerces_manual_to_auto(input_type, expected_type):
+    """Real-world bug: a "(manual)" support_type carried over verbatim
+    showed correctly in Slicer Next's Objects tab (Enable support on, Type
+    Tree(manual)) but generated zero actual support material at slice time
+    - "manual" needs designer-placed support points this pipeline has no
+    way to read. Coercing to "(auto)" makes the file self-sufficient."""
+    result = _normalize_support_settings({"support_type": input_type, "enable_support": "1"})
+    assert result["support_type"] == expected_type
+    assert result["enable_support"] == "1"
+
+
+def test_normalize_support_settings_no_support_type_is_noop():
+    settings = {"enable_support": "1", "support_style": "snug"}
+    assert _normalize_support_settings(settings) == settings
+
+
+def test_clean_declares_enough_filament_slots_for_painted_geometry(
+    tmp_path: Path, monkeypatch
+):
+    """Real-world regression: a plate with paint_color/mmu_segmentation
+    data (multi-color) also had support overrides, so it got a
+    reconstructed project_settings.config - but that file declared only 1
+    filament slot (the system profile default), and Slicer Next then
+    treated the project as genuinely single-color and dropped the painted
+    triangles once it started trusting the reconstructed file at all. The
+    slot count must come from the plate's own retained geometry, not just
+    default to 1."""
+    profiles_root = make_fake_profiles_dir(tmp_path, printer="Kobra X")
+    monkeypatch.setattr(
+        bc.anycubic_profiles, "find_profiles_dir", lambda override=None: profiles_root
+    )
+
+    src = tmp_path / "split_part.3mf"
+    write_3mf(
+        src,
+        split_part_main_model_xml(),
+        {
+            # split_part_external_model_xml() paints its first two
+            # triangles (paint_color="4", mmu_segmentation="4:0") - two
+            # distinct paint values, so 3 filament slots are needed
+            # (2 painted + 1 unpainted base).
+            "3D/Objects/object_2.model": split_part_external_model_xml(),
+            "Metadata/project_settings.config": project_settings_with_global_support(),
+        },
+    )
+    out = tmp_path / "split_part_clean.3mf"
+    result = clean_3mf(src, out, bed_size=PRINTER_PROFILES["Kobra X"])
+
+    assert result.project_profile_reconstructed
+    with zipfile.ZipFile(out) as zf:
+        project_settings = json.loads(zf.read("Metadata/project_settings.config"))
+        model_xml = zf.read("3D/3dmodel.model")
+
+    assert len(project_settings["filament_settings_id"]) == 3
+    assert len(project_settings["filament_type"]) == 3
+    # Paint data itself still made it through, same as before this fix.
+    assert b'paint_color="4"' in model_xml
+    assert b'mmu_segmentation="4:0"' in model_xml
+
+
+def test_clean_plain_plate_declares_single_filament_slot(tmp_path: Path, monkeypatch):
+    """A plate with no paint data at all shouldn't declare extra unused
+    filament slots."""
+    profiles_root = make_fake_profiles_dir(tmp_path, printer="Kobra X")
+    monkeypatch.setattr(
+        bc.anycubic_profiles, "find_profiles_dir", lambda override=None: profiles_root
+    )
+
+    src = tmp_path / "split_part.3mf"
+    write_3mf(
+        src,
+        split_part_main_model_xml(),
+        {
+            "3D/Objects/object_2.model": split_part_external_model_xml(paint=False),
+            "Metadata/project_settings.config": project_settings_with_global_support(),
+        },
+    )
+    out = tmp_path / "split_part_clean.3mf"
+    result = clean_3mf(src, out, bed_size=PRINTER_PROFILES["Kobra X"])
+
+    assert result.project_profile_reconstructed
+    with zipfile.ZipFile(out) as zf:
+        project_settings = json.loads(zf.read("Metadata/project_settings.config"))
+
+    assert len(project_settings["filament_settings_id"]) == 1

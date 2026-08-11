@@ -174,7 +174,8 @@
     "open_hint": "Haz doble clic en una fila para abrirla en tu slicer.",
     "failed": "Error en la conversión: {reason}",
     "recentered_note": "Reposicionado en la plataforma para ajustarse al volumen de impresión de la {printer}.",
-    "help": "Los archivos <b>.3mf</b> de Bambu Lab / MakerWorld llevan mucho lastre específico del slicer — metadatos de Bambu Studio, datos de pintura/multicolor, a veces incluso geometría dividida en archivos adicionales que el slicer de tu impresora no puede leer — lo que puede impedir que un modelo descargado se abra. Elige tu impresora arriba y luego suelta uno o varios archivos aquí (o una carpeta llena de ellos): la app elimina todo excepto la geometría real, la comprueba contra el volumen de impresión de tu impresora y te avisa de problemas como una malla demasiado grande, unidades inusuales o agujeros en la superficie. No se sube nada; todo ocurre en tu ordenador."
+    "support_kept_note": "Se conservó la configuración de soportes del diseñador para esta pieza.",
+    "help": "Los archivos <b>.3mf</b> de Bambu Lab / MakerWorld llevan mucho lastre específico del slicer — metadatos de Bambu Studio, a veces incluso geometría dividida en archivos adicionales que el slicer de tu impresora no puede leer — lo que puede impedir que un modelo descargado se abra. Elige tu impresora arriba y luego suelta uno o varios archivos aquí (o una carpeta llena de ellos): la app elimina todo excepto la geometría real, la comprueba contra el volumen de impresión de tu impresora y te avisa de problemas como una malla demasiado grande, unidades inusuales o agujeros en la superficie. No se sube nada; todo ocurre en tu ordenador."
   },
   "rinkhals": {
     "title": "Rinkhals",

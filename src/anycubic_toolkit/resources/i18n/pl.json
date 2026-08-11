@@ -174,7 +174,8 @@
     "open_hint": "Kliknij dwukrotnie wiersz, aby otworzyć go w swoim slicerze.",
     "failed": "Konwersja nie powiodła się: {reason}",
     "recentered_note": "Zmieniono położenie na platformie, aby zmieścić się w objętości roboczej {printer}.",
-    "help": "Pliki <b>.3mf</b> Bambu Lab / MakerWorld niosą ze sobą dużo bagau specyficznego dla slicera — metadane Bambu Studio, dane malowania/wielokolorowe, czasem nawet geometrię podzieloną na dodatkowe pliki, których slicer twojej drukarki nie potrafi odczytać — co może sprawić, że pobrany model się nie otworzy. Wybierz drukarkę powyżej, a następnie przeciągnij tutaj jeden lub więcej plików (lub cały folder): aplikacja usuwa wszystko oprócz rzeczywistej geometrii, sprawdza ją względem objętości roboczej twojej drukarki i ostrzega o problemach, takich jak zbyt duża siatka, nietypowe jednostki lub dziury w powierzchni. Nic nie jest przesyłane — wszystko dzieje się na twoim komputerze."
+    "support_kept_note": "Zachowano ustawienia podpór projektanta dla tej części.",
+    "help": "Pliki <b>.3mf</b> Bambu Lab / MakerWorld niosą ze sobą dużo bagau specyficznego dla slicera — metadane Bambu Studio, czasem nawet geometrię podzieloną na dodatkowe pliki, których slicer twojej drukarki nie potrafi odczytać — co może sprawić, że pobrany model się nie otworzy. Wybierz drukarkę powyżej, a następnie przeciągnij tutaj jeden lub więcej plików (lub cały folder): aplikacja usuwa wszystko oprócz rzeczywistej geometrii, sprawdza ją względem objętości roboczej twojej drukarki i ostrzega o problemach, takich jak zbyt duża siatka, nietypowe jednostki lub dziury w powierzchni. Nic nie jest przesyłane — wszystko dzieje się na twoim komputerze."
   },
   "rinkhals": {
     "title": "Rinkhals",
