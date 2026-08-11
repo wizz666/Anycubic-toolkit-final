@@ -10,7 +10,7 @@ the PySide6 user interface.
 from __future__ import annotations
 
 __app_name__: str = "Anycubic Toolkit"
-__version__: str = "0.3.0"
+__version__: str = "0.3.1"
 __author__: str = "Wizz"
 __license__: str = "MIT"
 __homepage__: str = "https://github.com/wizz666/Anycubic-toolkit-final"
