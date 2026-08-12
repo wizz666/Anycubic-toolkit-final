@@ -299,6 +299,32 @@ class MainWindow(QWidget):
             self.page_heading.setText(self._entry_title(self._entries[current]))
         self._populate_theme_combo()
 
+        # Each page connects its own retranslate() to the same
+        # language_changed signal in ModulePage.__init__, and those
+        # connections are made earlier (during _register_pages(), before
+        # this handler is connected) - Qt fires same-signal slots in
+        # connection order, so every page has already updated its text by
+        # the time this runs. A language switch changes dozens of labels
+        # across the visible page in one go, and Windows' compositor
+        # sometimes doesn't flush all of them to screen - the widgets' text
+        # is correct internally (confirmed via headless testing), but stale
+        # glyphs stay visible until something forces a real repaint. A plain
+        # .repaint() call wasn't enough to fix this in practice (confirmed
+        # against the real app) - what does reliably fix it is exactly what
+        # switching to another sidebar page and back already does: hide the
+        # page then show it again, which pushes it through Qt's normal
+        # show/hide repaint pipeline, and re-run on_shown() so any
+        # data-driven content (health tiles, printer status text - set by
+        # background fetch callbacks that format with the language active
+        # *at fetch time*, not re-rendered by retranslate()) reloads with
+        # the new language too instead of staying stuck with old text.
+        current_widget = self.stack.currentWidget()
+        if current_widget is not None:
+            current_widget.hide()
+            current_widget.show()
+            if isinstance(current_widget, ModulePage):
+                current_widget.on_shown()
+
     # -------------------------------------------------------------- top bar
 
     def _populate_theme_combo(self) -> None:

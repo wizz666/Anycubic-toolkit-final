@@ -705,6 +705,18 @@ class ConnectPage(ModulePage):
         self._sync_cloud_card()
         self._apply_cloud_poll_timer()
         self._check_cloud_lan_links()
+        # Card status text (state/mode/temps/print) is set once by whichever
+        # background refresh last completed, formatted with the language
+        # active *at that moment* - it isn't touched by retranslate() at
+        # all, so without this it stays stuck in the old language (or just
+        # stale) until the periodic poll timer or a manual Refresh click
+        # happens to fire again. Re-poll every card whenever this page
+        # becomes visible - covers both a language switch and simply
+        # navigating back to this page after a while.
+        for entry in self.ctx.config.get("printers", []) or []:
+            entry_id = entry.get("id", "")
+            if entry_id:
+                self._refresh_printer(entry_id)
 
     def _sync_cloud_card(self) -> None:
         enabled = bool(self.ctx.config.get("cloud_enabled"))
