@@ -119,6 +119,11 @@ class _PrinterCard(Card):
         self.name = str(entry.get("name", "")).strip()
         self._tr: Callable[..., str] | None = None
         self._light_on: bool | None = None
+        # Cloud entries have no host of their own (see self.host above) - this
+        # is instead the IP a background subnet scan found for the same
+        # model, so the user can see it even if they dismissed (or never
+        # saw) the one-time "add for local control?" popup.
+        self._found_lan_host: str | None = str(entry.get("found_lan_host") or "") or None
 
         body = self.body_layout()
 
@@ -130,8 +135,12 @@ class _PrinterCard(Card):
         self.host_label = QLabel(self.host)
         self.host_label.setObjectName("Muted")
         self.host_label.setVisible(bool(self.name))
+        self.found_lan_label = QLabel()
+        self.found_lan_label.setObjectName("Muted")
+        self.found_lan_label.setVisible(False)
         title_col.addWidget(self.name_label)
         title_col.addWidget(self.host_label)
+        title_col.addWidget(self.found_lan_label)
         header.addLayout(title_col, 1)
 
         self.refresh_btn = QPushButton()
@@ -200,11 +209,27 @@ class _PrinterCard(Card):
         self.web_btn.setText("\N{GLOBE WITH MERIDIANS} " + tr("connect.open_web"))
         self.camera_btn.setText("\N{VIDEO CAMERA} " + tr("connect.open_camera"))
         self._update_light_button()
+        self._update_found_lan_label()
 
     def _update_light_button(self) -> None:
         tr = self._tr or (lambda key, **_kw: key)
         key = "connect.light_off" if self._light_on else "connect.light_on"
         self.light_btn.setText("\N{ELECTRIC LIGHT BULB} " + tr(key))
+
+    def _update_found_lan_label(self) -> None:
+        tr = self._tr or (lambda key, **_kw: key)
+        if self._found_lan_host:
+            text = tr("connect.found_on_network", host=self._found_lan_host)
+            self.found_lan_label.setText("\N{ROUND PUSHPIN} " + text)
+        self.found_lan_label.setVisible(bool(self._found_lan_host))
+
+    def show_found_lan_host(self, host: str) -> None:
+        """Persist and display the IP a background subnet scan found for
+        this cloud printer's model - called once when the scan first finds
+        a match, and again on every future card rebuild via the entry's
+        stored ``found_lan_host`` so it survives across app restarts."""
+        self._found_lan_host = host
+        self._update_found_lan_label()
 
     # --------------------------------------------------------------- display
 
@@ -1224,15 +1249,25 @@ class ConnectPage(ModulePage):
     # ---------------------------------------------------- cloud/LAN linking
 
     def _check_cloud_lan_links(self) -> None:
-        """For every cloud printer that hasn't been checked yet (this run),
-        look for the same model on the local network and, if found, offer to
-        add it too — giving that printer full local control (pause/resume/
-        stop, live temps) alongside its cloud (away-from-home) status."""
+        """For every cloud printer without a known local IP yet, look for
+        the same model on the local network and, if found, offer to add it
+        too — giving that printer full local control (pause/resume/stop,
+        live temps) alongside its cloud (away-from-home) status.
+
+        ``lan_link_checked`` alone used to gate this permanently after the
+        first attempt - fine for "don't re-show the popup" but it also
+        meant an entry that found nothing the first time (e.g. the printer
+        was in cloud mode back then) would never get a second look, even
+        after switching to LAN mode later. Now only entries that have
+        already found and stored a host are skipped; everything else gets
+        rechecked on every page load so the found-IP display in
+        _PrinterCard can actually catch up once the printer becomes
+        reachable."""
         prefix = local_subnet_prefix()
         if not prefix:
             return
         for entry in self.ctx.config.get("printers", []) or []:
-            if entry.get("kind") != "cloud" or entry.get("lan_link_checked"):
+            if entry.get("kind") != "cloud" or entry.get("found_lan_host"):
                 continue
             entry_id = entry.get("id", "")
             if not entry_id or entry_id in self._lan_link_checking:
@@ -1243,11 +1278,11 @@ class ConnectPage(ModulePage):
             worker.signals.finished.connect(
                 lambda host, eid=entry_id: self._on_lan_link_result(eid, host)
             )
-            worker.signals.error.connect(lambda _msg, eid=entry_id: self._mark_lan_link_checked(eid))
+            worker.signals.error.connect(lambda _msg, eid=entry_id: self._lan_link_checking.discard(eid))
             run_in_background(worker)
 
     def _on_lan_link_result(self, cloud_entry_id: str, host: str) -> None:
-        self._mark_lan_link_checked(cloud_entry_id)
+        self._lan_link_checking.discard(cloud_entry_id)
         if not host:
             return
         printers = self.ctx.config.get("printers", []) or []
@@ -1257,6 +1292,14 @@ class ConnectPage(ModulePage):
         if entry is None:
             return
         name = str(entry.get("name") or host)
+
+        # Show/persist the found IP on the cloud card right away, regardless
+        # of what the user does with the popup below - dismissing it (or
+        # never seeing it) shouldn't lose the one useful fact it found.
+        self._save_found_lan_host(cloud_entry_id, host)
+        card = self._cards.get(cloud_entry_id)
+        if card is not None:
+            card.show_found_lan_host(host)
 
         dialog = SelectionDialog(
             self.tr_("connect.lan_link_title"),
@@ -1278,13 +1321,12 @@ class ConnectPage(ModulePage):
         self._refresh_printer(new_entry["id"], manual=True)
         self.status_label.setText(self.tr_("connect.lan_link_added", name=name))
 
-    def _mark_lan_link_checked(self, cloud_entry_id: str) -> None:
-        self._lan_link_checking.discard(cloud_entry_id)
+    def _save_found_lan_host(self, cloud_entry_id: str, host: str) -> None:
         printers = list(self.ctx.config.get("printers", []) or [])
         changed = False
         for entry in printers:
-            if entry.get("id") == cloud_entry_id and not entry.get("lan_link_checked"):
-                entry["lan_link_checked"] = True
+            if entry.get("id") == cloud_entry_id and entry.get("found_lan_host") != host:
+                entry["found_lan_host"] = host
                 changed = True
         if changed:
             self.ctx.config.set("printers", printers)

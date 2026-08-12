@@ -14,7 +14,7 @@
 ; __version__ - bump both together on release.
 
 #define AppName "Anycubic Toolkit"
-#define AppVersion "0.3.1"
+#define AppVersion "0.3.2"
 #define AppPublisher "Wizz"
 #define AppURL "https://github.com/wizz666/Anycubic-toolkit-final"
 #define AppExeName "AnycubicToolkit.exe"
