@@ -96,6 +96,12 @@
     "unknown": "Nieznany",
     "failed": "Analiza nie powiodła się: {reason}",
     "issue_list": "Wykryte problemy",
+    "export": "Eksportuj rozpakowane logi…",
+    "exporting": "Rozpakowywanie logów…",
+    "export_saved": "Wyodrębniono {count} plików do {path}",
+    "export_failed": "Nie udało się wyodrębnić logów: {reason}",
+    "export_hint": "Odblokowuje paczkę i zapisuje oryginalne pliki logów. Mogą zawierać numer seryjny i dane Wi-Fi — udostępniaj tylko zaufanym osobom.",
+    "export_missing": "Oryginalny plik AC_LOG.pack nie znajduje się już w {path}. Upuść plik ponownie, aby wyeksportować.",
     "help": "Drukarka Anycubic może zapisać plik diagnostyczny o nazwie <b>AC_LOG.pack</b> (wyeksportuj go z ustawień drukarki na pendrive). Przeciągnij ten plik na tę stronę — aplikacja odblokuje go i odczyta model drukarki, firmware oraz ewentualne błędy, a następnie wystawi wynik kondycji. Nic nie jest wysyłane do sieci; wszystko pozostaje na tym komputerze."
   },
   "errors": {

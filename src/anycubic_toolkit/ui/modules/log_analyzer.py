@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from PySide6.QtCore import QUrl
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QFileDialog,
     QFormLayout,
@@ -97,6 +99,21 @@ class LogAnalyzerPage(ModulePage):
         self.fixes_label.setWordWrap(True)
         body.addWidget(self.fixes_label)
 
+        self.export_btn = QPushButton()
+        self.export_btn.setObjectName("Primary")
+        self.export_btn.clicked.connect(self._export_logs)
+        body.addWidget(self.export_btn)
+
+        self.export_hint = QLabel()
+        self.export_hint.setObjectName("Muted")
+        self.export_hint.setWordWrap(True)
+        body.addWidget(self.export_hint)
+
+        self.export_status = QLabel()
+        self.export_status.setObjectName("Muted")
+        self.export_status.setWordWrap(True)
+        body.addWidget(self.export_status)
+
         self.issue_tree = QTreeWidget()
         self.issue_tree.setColumnCount(4)
         self.issue_tree.setRootIsDecorated(False)
@@ -148,6 +165,8 @@ class LogAnalyzerPage(ModulePage):
         self.issue_tree.setHeaderLabels(
             ["", "Code", "File", self.tr_("log.issue_list")]
         )
+        self.export_btn.setText("\N{FLOPPY DISK} " + self.tr_("log.export"))
+        self.export_hint.setText(self.tr_("log.export_hint"))
         analysis = self.ctx.last_analysis
         if analysis is not None:
             self._show_result(analysis, persist=False)
@@ -169,6 +188,7 @@ class LogAnalyzerPage(ModulePage):
         if self._busy:
             return
         self._busy = True
+        self.export_btn.setEnabled(False)
         self.error_label.setVisible(False)
         self.progress.setVisible(True)
         self.progress_label.setVisible(True)
@@ -193,12 +213,74 @@ class LogAnalyzerPage(ModulePage):
 
     def _on_error(self, message: str) -> None:
         self._busy = False
+        self.export_btn.setEnabled(self.ctx.last_analysis is not None)
         self.progress.setVisible(False)
         self.progress_label.setVisible(False)
         self.error_label.setText(
             "\N{WARNING SIGN} " + self.tr_("log.failed", reason=message)
         )
         self.error_label.setVisible(True)
+
+    # --------------------------------------------------------------- export
+
+    def _export_logs(self) -> None:
+        analysis = self.ctx.last_analysis
+        if analysis is None or not analysis.source_path:
+            return
+        pack = Path(analysis.source_path)
+        if not pack.is_file():
+            self.export_status.setText(
+                "\N{WARNING SIGN} "
+                + self.tr_("log.export_missing", path=str(pack))
+            )
+            return
+        if self._busy:
+            return
+
+        start_dir = str(Path(self.ctx.config.get("download_folder")))
+        chosen = QFileDialog.getExistingDirectory(
+            self, self.tr_("log.export"), start_dir
+        )
+        if not chosen:
+            return
+
+        dest = Path(chosen)
+        if dest.name.lower() != pack.stem.lower():
+            dest = dest / pack.stem
+
+        self._busy = True
+        self.export_btn.setEnabled(False)
+        self.export_status.setText("")
+        self.progress.setVisible(True)
+        self.progress_label.setVisible(True)
+        self.progress.setValue(0)
+        self.progress_label.setText(self.tr_("log.exporting"))
+
+        worker = FunctionWorker(self.analyzer.extract_to, pack, dest)
+        worker.signals.progress.connect(self._on_progress)
+        worker.signals.finished.connect(self._on_export_finished)
+        worker.signals.error.connect(self._on_export_error)
+        run_in_background(worker)
+
+    def _on_export_finished(self, dest: Path) -> None:
+        self._busy = False
+        self.export_btn.setEnabled(True)
+        self.progress.setVisible(False)
+        self.progress_label.setVisible(False)
+        count = sum(1 for path in dest.rglob("*") if path.is_file())
+        self.export_status.setText(
+            self.tr_("log.export_saved", count=count, path=str(dest))
+        )
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(dest)))
+
+    def _on_export_error(self, message: str) -> None:
+        self._busy = False
+        self.export_btn.setEnabled(True)
+        self.progress.setVisible(False)
+        self.progress_label.setVisible(False)
+        self.export_status.setText(
+            "\N{WARNING SIGN} " + self.tr_("log.export_failed", reason=message)
+        )
 
     # -------------------------------------------------------------- display
 
@@ -241,4 +323,7 @@ class LogAnalyzerPage(ModulePage):
         for column in range(3):
             self.issue_tree.resizeColumnToContents(column)
 
+        if persist:
+            self.export_status.setText("")
+        self.export_btn.setEnabled(True)
         self.result_card.setVisible(True)

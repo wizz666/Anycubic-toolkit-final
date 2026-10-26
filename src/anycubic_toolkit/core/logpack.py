@@ -212,6 +212,29 @@ class LogPackAnalyzer:
         report(100, "Done")
         return result
 
+    def extract_to(
+        self,
+        pack_path: Path,
+        dest_dir: Path,
+        progress: ProgressFn | None = None,
+    ) -> Path:
+        """Unlock *pack_path* and extract every file into *dest_dir*.
+
+        Returns *dest_dir*. Extraction is fully local — log contents never
+        leave the machine. The destination is created if it does not exist.
+        """
+        report = progress or (lambda _p, _t: None)
+
+        report(5, "Fetching password database")
+        passwords = self._fetch_passwords()
+
+        report(20, "Unlocking archive")
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        self._extract(pack_path, dest_dir, passwords)
+
+        report(100, "Done")
+        return dest_dir
+
     # ------------------------------------------------------------ passwords
 
     def _fetch_passwords(self) -> list[str]:

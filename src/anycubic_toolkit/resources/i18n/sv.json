@@ -96,6 +96,12 @@
     "unknown": "Okänd",
     "failed": "Analysen misslyckades: {reason}",
     "issue_list": "Upptäckta problem",
+    "export": "Exportera uppackade loggar…",
+    "exporting": "Packar upp loggar…",
+    "export_saved": "Extraherade {count} filer till {path}",
+    "export_failed": "Kunde inte extrahera loggarna: {reason}",
+    "export_hint": "Låser upp paketet och sparar originalfilerna. De kan innehålla serienummer och Wi-Fi-uppgifter — dela bara med personer du litar på.",
+    "export_missing": "Originalfilen AC_LOG.pack finns inte längre på {path}. Släpp filen igen för att exportera.",
     "help": "Din Anycubic-skrivare kan spara en diagnostikfil som heter <b>AC_LOG.pack</b> (exportera den från skrivarens inställningar till ett USB-minne). Dra filen till den här sidan — appen låser upp den och läser av modell, firmware och eventuella fel, och ger en hälsopoäng. Inget laddas upp; allt stannar på din dator."
   },
   "errors": {

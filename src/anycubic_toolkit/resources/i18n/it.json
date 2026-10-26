@@ -96,6 +96,12 @@
     "unknown": "Sconosciuto",
     "failed": "Analisi non riuscita: {reason}",
     "issue_list": "Problemi rilevati",
+    "export": "Esporta i log estratti…",
+    "exporting": "Estrazione dei log…",
+    "export_saved": "Estratti {count} file in {path}",
+    "export_failed": "Impossibile estrarre i log: {reason}",
+    "export_hint": "Sblocca l'archivio e salva i file di log originali. Possono includere numero di serie e dati Wi-Fi — condividili solo con persone di fiducia.",
+    "export_missing": "Il file AC_LOG.pack originale non è più in {path}. Rilascia di nuovo il file per esportare.",
     "help": "La tua stampante Anycubic può salvare un file diagnostico chiamato <b>AC_LOG.pack</b> (esportalo dalle impostazioni della stampante su una chiavetta USB). Trascina quel file su questa pagina — l'app lo sblocca e lo legge per individuare il modello della stampante, il firmware ed eventuali errori, quindi assegna un punteggio di salute. Nulla viene caricato online; tutto resta sul tuo computer."
   },
   "errors": {

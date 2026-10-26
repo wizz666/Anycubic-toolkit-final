@@ -96,6 +96,12 @@
     "unknown": "Inconnu",
     "failed": "Échec de l'analyse : {reason}",
     "issue_list": "Problèmes détectés",
+    "export": "Exporter les journaux extraits…",
+    "exporting": "Extraction des journaux…",
+    "export_saved": "{count} fichiers extraits vers {path}",
+    "export_failed": "Impossible d'extraire les journaux : {reason}",
+    "export_hint": "Déverrouille l'archive et enregistre les fichiers journaux d'origine. Ils peuvent contenir le numéro de série et des données Wi-Fi — ne les partagez qu'avec des personnes de confiance.",
+    "export_missing": "Le fichier AC_LOG.pack d'origine n'est plus à {path}. Déposez à nouveau le fichier pour exporter.",
     "help": "Votre imprimante Anycubic peut enregistrer un fichier de diagnostic appelé <b>AC_LOG.pack</b> (exportez-le depuis les paramètres de l'imprimante vers une clé USB). Glissez ce fichier sur cette page — l'application le déverrouille et le lit pour trouver le modèle de votre imprimante, le firmware et d'éventuelles erreurs, puis attribue un score de santé. Rien n'est envoyé en ligne ; tout reste sur votre ordinateur."
   },
   "errors": {

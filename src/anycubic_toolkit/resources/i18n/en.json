@@ -96,6 +96,12 @@
     "unknown": "Unknown",
     "failed": "Analysis failed: {reason}",
     "issue_list": "Detected issues",
+    "export": "Export extracted logs…",
+    "exporting": "Extracting logs…",
+    "export_saved": "Extracted {count} files to {path}",
+    "export_failed": "Could not extract logs: {reason}",
+    "export_hint": "Unlocks the pack and saves the original log files. They may include serial numbers and Wi-Fi details — only share with people you trust.",
+    "export_missing": "The original AC_LOG.pack is no longer at {path}. Drop the file again to export.",
     "help": "Your Anycubic printer can save a diagnostics file called <b>AC_LOG.pack</b> (export it from the printer’s settings onto a USB stick). Drag that file onto this page — the app unlocks it and reads it to find your printer model, firmware and any errors, then gives a health score. Nothing is uploaded; it all stays on your computer."
   },
   "errors": {

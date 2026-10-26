@@ -34,7 +34,9 @@ interrupt power during an update.
 - **Log Analyzer** — drop an `AC_LOG.pack` file; it is unlocked and analyzed
   **entirely on your machine**. Your logs never leave your computer — only the
   password database is downloaded. See the detected printer, firmware, errors,
-  warnings, a health score and suggested fixes.
+  warnings, a health score and suggested fixes. After analysis you can export
+  the unlocked log files to a folder (they may include serial numbers and
+  Wi-Fi details — only share them with people you trust).
 - **Error Code Lookup** — type an Anycubic error code (e.g. `11518`) and get its
   description and summary, fetched **directly from the Anycubic Wiki** page for
   that code, with a link to the full troubleshooting guide.
